@@ -338,48 +338,274 @@ function LearnMode({ course }) {
 
 function CompeteMode({ course }) {
   const [scores, setScores] = useState([0, 0])
+  const [selectedGame, setSelectedGame] = useState('menu')
   const [side, setSide] = useState('en')
-  const [wordIndex, setWordIndex] = useState(() => Math.floor(Math.random() * course.words.length))
+  const [deck, setDeck] = useState(() => shuffleWords(course.words))
+  const [cardIndex, setCardIndex] = useState(0)
   const [answer, setAnswer] = useState(false)
   const [confirmReset, setConfirmReset] = useState(false)
-  const word = course.words[wordIndex]
+  const [dealing, setDealing] = useState(false)
+  const [questionKey, setQuestionKey] = useState(0)
+  const [celebration, setCelebration] = useState(null)
+  const [questionsComplete, setQuestionsComplete] = useState(false)
+  const [gameEnded, setGameEnded] = useState(false)
+  const [settlementPhase, setSettlementPhase] = useState(null)
+  const word = deck[cardIndex]
+  const isLastCard = cardIndex === deck.length - 1
+
+  useEffect(() => {
+    if (!celebration) return
+    const timer = setTimeout(() => setCelebration(null), 1800)
+    return () => clearTimeout(timer)
+  }, [celebration])
+
+  useEffect(() => {
+    if (settlementPhase !== 'drum') return
+    const stopSound = playDrumRoll()
+    const timer = setTimeout(() => setSettlementPhase('result'), 2900)
+    return () => { clearTimeout(timer); stopSound?.() }
+  }, [settlementPhase])
+
   const nextWord = () => {
-    let next = wordIndex
-    if (course.words.length > 1) while (next === wordIndex) next = Math.floor(Math.random() * course.words.length)
-    setWordIndex(next); setAnswer(false)
+    if (isLastCard) {
+      setQuestionsComplete(true)
+      setAnswer(false)
+      return
+    }
+    setCardIndex(i => i + 1); setAnswer(false); setQuestionKey(k => k + 1)
   }
-  const add = team => setScores(s => s.map((n, i) => i === team ? n + 1 : n))
+  const add = team => {
+    setScores(s => s.map((n, i) => i === team ? n + 1 : n))
+    setCelebration({ team, id: Date.now() })
+  }
+  const settleGame = () => {
+    setGameEnded(true)
+    setSettlementPhase('drum')
+  }
+  const startFlashGame = () => {
+    setDeck(shuffleWords(course.words)); setCardIndex(0); setAnswer(false)
+    setQuestionsComplete(false); setQuestionKey(k => k + 1); setSelectedGame('flash'); setDealing(true)
+    setTimeout(() => setDealing(false), window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 80 : 1900)
+  }
+  const restartGame = () => {
+    setScores([0, 0]); setDeck(shuffleWords(course.words)); setCardIndex(0)
+    setAnswer(false); setQuestionsComplete(false); setGameEnded(false)
+    setSettlementPhase(null); setQuestionKey(k => k + 1); setDealing(false); setSelectedGame('menu')
+  }
 
   return <section className="compete-mode">
     <div className="compete-heading">
       <div className="mode-heading"><span className="round-icon blue"><Trophy /></span><div><span>CLASSROOM CHALLENGE</span><h1>雙隊搶答賽</h1></div></div>
-      <button className="reset-button" onClick={() => setConfirmReset(true)}><RotateCcw size={16} /> 重設比分</button>
+      <div className="compete-header-actions">
+        <button className="reset-button" onClick={() => setConfirmReset(true)}><RotateCcw size={16} /> 重設比分</button>
+        <button className="settle-button" disabled={gameEnded} onClick={settleGame}><Trophy size={17} /> 結算成績</button>
+      </div>
     </div>
     <div className="scoreboard">
-      <TeamScore team="A" score={scores[0]} color="coral" onAdd={() => add(0)} />
+      <TeamScore team="A" score={scores[0]} color="coral" disabled={gameEnded} celebrating={celebration?.team === 0} onAdd={() => add(0)} />
       <div className="challenge-center">
-        <div className="round-label"><span>ROUND</span><strong>{scores[0] + scores[1] + 1}</strong></div>
-        <div className="side-picker"><button className={side === 'en' ? 'active' : ''} onClick={() => { setSide('en'); setAnswer(false) }}>顯示英文</button><button className={side === 'zh' ? 'active' : ''} onClick={() => { setSide('zh'); setAnswer(false) }}>顯示中文</button></div>
-        <div className={`challenge-card ${answer ? 'revealed' : ''}`}>
-          <span>{answer ? '正確答案' : side === 'en' ? 'ENGLISH' : '中文'}</span>
-          <h2>{answer ? (side === 'en' ? word.zh : word.en) : (side === 'en' ? word.en : word.zh)}</h2>
-          {answer && <p>{word.part} · {word.example}</p>}
-          {!answer && side === 'en' && <button className="round-speak" onClick={() => { const u = new SpeechSynthesisUtterance(word.en); u.lang = 'en-US'; speechSynthesis.speak(u) }}><Volume2 /></button>}
-        </div>
-        <div className="challenge-actions"><button className="answer-button" onClick={() => setAnswer(v => !v)}>{answer ? <RotateCcw /> : <CircleHelp />}{answer ? '隱藏答案' : '顯示答案'}</button><button className="next-button" onClick={nextWord}>下一題 <ChevronRight /></button></div>
-        <div className="teacher-tip"><Flame size={16} /> 老師請判定搶答結果，再點隊伍的「答對 +1」</div>
+        {gameEnded ? <CompetitionEnded onRestart={restartGame} /> : selectedGame === 'menu' ? <GameSelector onSelect={game => game === 'flash' ? startFlashGame() : setSelectedGame(game)} /> : selectedGame === 'match' ? <MatchCardsGame words={course.words} onScore={add} onBack={() => setSelectedGame('menu')} /> : <>
+          <button className="game-back-button" onClick={() => setSelectedGame('menu')}><ArrowLeft /> 選擇其他遊戲</button>
+          <div className="round-label"><span>QUESTION</span><strong>{Math.min(cardIndex + 1, deck.length)} / {deck.length}</strong></div>
+          <div className="side-picker"><button disabled={dealing} className={side === 'en' ? 'active' : ''} onClick={() => { setSide('en'); setAnswer(false) }}>顯示英文</button><button disabled={dealing} className={side === 'zh' ? 'active' : ''} onClick={() => { setSide('zh'); setAnswer(false) }}>顯示中文</button></div>
+          <div className="competition-progress"><i style={{ width: `${questionsComplete ? 100 : ((cardIndex + 1) / deck.length) * 100}%` }} /></div>
+          {dealing && <DealSequence words={deck} />}
+          {!questionsComplete ? <div key={questionKey} className={`challenge-card ${dealing ? 'waiting' : ''}`}>
+            <div className={`challenge-card-inner ${answer ? 'flipped' : ''}`}>
+              <div className="challenge-face challenge-front"><span>{side === 'en' ? 'ENGLISH' : '中文'}</span><h2>{side === 'en' ? word.en : word.zh}</h2>{side === 'en' && <button className="round-speak" onClick={() => { const u = new SpeechSynthesisUtterance(word.en); u.lang = 'en-US'; speechSynthesis.speak(u) }}><Volume2 /></button>}</div>
+              <div className="challenge-face challenge-back"><span><Sparkles size={15} /> 正確答案</span><h2>{side === 'en' ? word.zh : word.en}</h2><p>{word.part} · {word.example}</p></div>
+            </div>
+          </div> : <div className="questions-complete-card"><span><Check /></span><small>ALL DONE</small><h2>題目作答完畢！</h2><p>{deck.length} 張字卡已全部完成，可以選擇其他遊戲或結算成績。</p><button onClick={() => setSelectedGame('menu')}><ListMusic /> 選擇其他遊戲</button></div>}
+          {!questionsComplete && <div className="challenge-actions"><button disabled={dealing} className="answer-button" onClick={() => setAnswer(v => !v)}>{answer ? <RotateCcw /> : <CircleHelp />}{answer ? '隱藏答案' : '顯示答案'}</button><button disabled={dealing} className="next-button" onClick={nextWord}>{isLastCard ? '完成作答' : '下一題'} <ChevronRight /></button></div>}
+          <div className="teacher-tip"><Flame size={16} /> 老師請判定搶答結果，再點隊伍的「答對 +1」</div>
+        </>}
       </div>
-      <TeamScore team="B" score={scores[1]} color="blue" onAdd={() => add(1)} />
+      <TeamScore team="B" score={scores[1]} color="blue" disabled={gameEnded} celebrating={celebration?.team === 1} onAdd={() => add(1)} />
     </div>
-    {confirmReset && <Modal title="確定要重設比分嗎？" text="A、B 兩隊的分數都會回到 0，這個動作無法復原。" onCancel={() => setConfirmReset(false)} onConfirm={() => { setScores([0, 0]); setConfirmReset(false); setAnswer(false) }} />}
+    {celebration && <ScoreCelebration key={celebration.id} team={celebration.team} />}
+    {settlementPhase && <ResultCeremony phase={settlementPhase} scores={scores} onClose={() => { setSettlementPhase(null); setSelectedGame('menu') }} onRestart={restartGame} />}
+    {confirmReset && <Modal title="確定要重設比分嗎？" text="A、B 兩隊的分數都會回到 0，這個動作無法復原。" onCancel={() => setConfirmReset(false)} onConfirm={() => { setScores([0, 0]); setCelebration(null); setConfirmReset(false); setAnswer(false) }} />}
   </section>
 }
 
-function TeamScore({ team, score, color, onAdd }) {
-  return <div className={`team-score ${color}`}>
+function GameSelector({ onSelect }) {
+  return <div className="game-selector">
+    <small>CHOOSE A GAME</small><h2>選擇比賽項目</h2>
+    <div className="game-options">
+      <button onClick={() => onSelect('flash')}><span className="game-option-icon flash"><Sparkles /></span><div><strong>卡片搶答</strong><small>QUICK ANSWER</small><p>隨機出題，兩隊比速度搶答。</p></div><ChevronRight /></button>
+      <button onClick={() => onSelect('match')}><span className="game-option-icon match"><Shuffle /></span><div><strong>Match Cards</strong><small>MEMORY MATCH</small><p>翻牌配對，再回答中文意思。</p></div><ChevronRight /></button>
+    </div>
+    <div className="shared-score-note"><Trophy /> 所有遊戲共用左右兩隊的累計分數</div>
+  </div>
+}
+
+function CompetitionEnded({ onRestart }) {
+  return <div className="competition-ended"><span>🏁</span><small>COMPETITION ENDED</small><h2>本場比賽已結束</h2><p>成績已完成結算。準備好後，可以重新開始一場全新的比賽。</p><button onClick={onRestart}><RotateCcw /> 開始新比賽</button></div>
+}
+
+function createMatchCards(words) {
+  const pairWords = Array.from({ length: 8 }, (_, i) => words[i % words.length])
+  const cards = pairWords.flatMap((word, pair) => [
+    { uid: `${pair}-a`, word, matched: false }, { uid: `${pair}-b`, word, matched: false },
+  ])
+  return shuffleWords(cards)
+}
+
+function MatchCardsGame({ words, onScore, onBack }) {
+  const [cards, setCards] = useState(() => createMatchCards(words))
+  const [currentTeam, setCurrentTeam] = useState(null)
+  const [opened, setOpened] = useState([])
+  const [locked, setLocked] = useState(false)
+  const [prompt, setPrompt] = useState(null)
+  const [complete, setComplete] = useState(false)
+  const timers = useRef([])
+  useEffect(() => () => timers.current.forEach(clearTimeout), [])
+  const schedule = (fn, delay) => { const timer = setTimeout(fn, delay); timers.current.push(timer) }
+  const matchedCount = cards.filter(card => card.matched).length / 2
+
+  const chooseCard = index => {
+    if (currentTeam === null || locked || complete || cards[index].matched || opened.includes(index)) return
+    const nextOpened = [...opened, index]
+    setOpened(nextOpened)
+    if (nextOpened.length < 2) return
+    setLocked(true)
+    const [first, second] = nextOpened.map(i => cards[i])
+    if (first.word.id === second.word.id) {
+      schedule(() => setPrompt({ indices: nextOpened, word: first.word, answerShown: false }), 650)
+    } else {
+      schedule(() => { setOpened([]); setCurrentTeam(team => team === 0 ? 1 : 0); setLocked(false) }, 1050)
+    }
+  }
+  const answerWrong = () => {
+    setOpened([]); setPrompt(null); setCurrentTeam(team => team === 0 ? 1 : 0); setLocked(false)
+  }
+  const answerCorrect = () => {
+    const matchedIndices = prompt.indices
+    const finished = cards.filter(card => card.matched).length + 2 === cards.length
+    setPrompt(value => ({ ...value, answerShown: true, finished }))
+    setCards(old => old.map((card, i) => matchedIndices.includes(i) ? { ...card, matched: true } : card))
+    onScore(currentTeam)
+  }
+  const continueAfterCorrect = () => {
+    const finished = prompt.finished
+    setOpened([]); setPrompt(null); setLocked(false)
+    if (finished) setComplete(true)
+  }
+
+  return <div className="match-game">
+    <button className="game-back-button" onClick={onBack}><ArrowLeft /> 選擇其他遊戲</button>
+    <div className="match-heading"><div><small>MATCH CARDS</small><strong>配對記憶賽</strong></div>{currentTeam !== null && <div className={`turn-badge team-${currentTeam}`}><span>目前回合</span><strong>{currentTeam === 0 ? 'A' : 'B'} 隊</strong></div>}</div>
+    <div className="match-progress"><span>已完成 {matchedCount} / 8 對</span><div><i style={{ width: `${matchedCount / 8 * 100}%` }} /></div></div>
+    <div className="match-board">
+      {cards.map((card, index) => {
+        const isOpen = opened.includes(index) || card.matched
+        return <button key={card.uid} disabled={currentTeam === null || card.matched} onClick={() => chooseCard(index)} className={`match-card ${isOpen ? 'open' : ''} ${card.matched ? 'matched' : ''}`}><span className="match-card-inner"><span className="match-card-cover"><Music2 /><b>?</b></span><span className="match-card-face"><small>EN</small><strong>{card.word.en}</strong>{card.matched && <Check />}</span></span></button>
+      })}
+    </div>
+    {currentTeam === null && <div className="starter-overlay"><h2>哪一隊先開始？</h2><div><button onClick={() => setCurrentTeam(0)}>A 隊先攻</button><button onClick={() => setCurrentTeam(1)}>B 隊先攻</button></div></div>}
+    {prompt && <div className={`match-answer-panel ${prompt.answerShown ? 'answer-revealed' : ''}`}><span className="match-success"><Sparkles /> 配對成功！</span><p>請 {currentTeam === 0 ? 'A' : 'B'} 隊回答這個單字的中文意思：</p><h2>{prompt.word.en}</h2>{!prompt.answerShown ? <><p className="judge-label">老師請判定回答是否正確</p><div className="judge-actions"><button onClick={answerWrong}><X /> 答錯，換隊</button><button onClick={answerCorrect}><Check /> 答對 +1</button></div></> : <div className="translation-reveal"><span><Check /> 回答正確！</span><div className="translation-answer"><small>中文答案</small><strong>{prompt.word.zh}</strong></div><p className={`continue-turn team-${currentTeam}`}>{currentTeam === 0 ? 'A' : 'B'} 隊可繼續翻牌</p><button className="continue-match-button" onClick={continueAfterCorrect}>繼續 <ChevronRight /></button></div>}</div>}
+    {complete && <div className="match-complete"><span>🎊</span><small>ALL MATCHED</small><h2>全部配對完成！</h2><p>8 組單字都已經找到，可以回去選擇其他遊戲。</p><button onClick={onBack}><ListMusic /> 選擇其他遊戲</button></div>}
+  </div>
+}
+
+function shuffleWords(words) {
+  const result = [...words]
+  for (let i = result.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[result[i], result[j]] = [result[j], result[i]]
+  }
+  return result
+}
+
+function playDrumRoll() {
+  const AudioContext = window.AudioContext || window.webkitAudioContext
+  if (!AudioContext) return
+  const context = new AudioContext()
+  const master = context.createGain()
+  master.gain.value = .18
+  master.connect(context.destination)
+  const noise = context.createBuffer(1, context.sampleRate * .08, context.sampleRate)
+  const data = noise.getChannelData(0)
+  for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1
+  const start = context.currentTime + .05
+  for (let i = 0; i < 30; i++) {
+    const source = context.createBufferSource()
+    const gain = context.createGain()
+    const filter = context.createBiquadFilter()
+    source.buffer = noise; filter.type = 'lowpass'; filter.frequency.value = 650
+    const time = start + i * (.11 - i * .0018)
+    gain.gain.setValueAtTime(0, time); gain.gain.linearRampToValueAtTime(.6 + i / 70, time + .008); gain.gain.exponentialRampToValueAtTime(.01, time + .075)
+    source.connect(filter); filter.connect(gain); gain.connect(master); source.start(time)
+  }
+  const finale = start + 2.65
+  ;[523.25, 659.25, 783.99].forEach((frequency, i) => {
+    const oscillator = context.createOscillator(); const gain = context.createGain()
+    oscillator.type = i === 0 ? 'triangle' : 'sine'; oscillator.frequency.value = frequency
+    gain.gain.setValueAtTime(0, finale); gain.gain.linearRampToValueAtTime(.45, finale + .025); gain.gain.exponentialRampToValueAtTime(.01, finale + 1.1)
+    oscillator.connect(gain); gain.connect(master); oscillator.start(finale); oscillator.stop(finale + 1.15)
+  })
+  const closeTimer = setTimeout(() => context.close(), 4300)
+  return () => { clearTimeout(closeTimer); setTimeout(() => context.close().catch(() => {}), 1200) }
+}
+
+function ResultCeremony({ phase, scores, onClose, onRestart }) {
+  const tie = scores[0] === scores[1]
+  const winner = scores[0] > scores[1] ? 'A' : 'B'
+  return <div className={`result-ceremony ${phase}`} role="dialog" aria-modal="true" aria-label="比賽結果">
+    {phase === 'drum' ? <div className="drum-stage">
+      <div className="spotlight left" /><div className="spotlight right" />
+      <div className="drum-visual"><span>🥁</span><i className="stick-one" /><i className="stick-two" /></div>
+      <small>FINAL RESULT</small><h2>成績結算中</h2><div className="drum-dots"><i /><i /><i /><i /><i /></div>
+    </div> : <div className="winner-stage">
+      <div className="winner-rays" />
+      {Array.from({ length: 36 }, (_, i) => <i className="winner-confetti" key={i} style={{ '--x': `${(i * 83) % 100}vw`, '--delay': `${(i % 8) * .08}s`, '--color': ['#ff6940','#ffd055','#45b893','#4d8bd2','#9b67d5'][i % 5] }} />)}
+      <small>{tie ? 'WHAT A MATCH!' : 'CONGRATULATIONS!'}</small>
+      <div className="winner-trophy">{tie ? '🤝' : '🏆'}</div>
+      <h2>{tie ? '本場平手！' : `${winner} 隊獲勝！`}</h2>
+      <p>{tie ? '兩隊表現一樣出色' : '恭喜獲得本場比賽的勝利'}</p>
+      <div className="final-scores"><div className={winner === 'A' && !tie ? 'winner' : ''}><span>A 隊</span><strong>{scores[0]}</strong></div><em>：</em><div className={winner === 'B' && !tie ? 'winner' : ''}><strong>{scores[1]}</strong><span>B 隊</span></div></div>
+      <div className="result-actions"><button onClick={onClose}>查看比賽頁</button><button onClick={onRestart}><RotateCcw /> 再比一場</button></div>
+    </div>}
+  </div>
+}
+
+function DealSequence({ words }) {
+  return <div className="deal-sequence" aria-hidden="true">
+    <div className="deal-title"><Shuffle /><span>正在洗牌</span></div>
+    {words.map((word, i) => {
+      const slot = i % 8
+      return <div className="deal-card" style={{
+        '--delay': `${slot * .09}s`, '--start-x': `${(slot - 3.5) * 95}px`,
+        '--start-r': `${(slot - 3.5) * 18}deg`, '--angle': `${(slot - 3.5) * 2.2}deg`,
+        zIndex: i + 1,
+      }} key={word.id}><Music2 /><span>{word.en}</span></div>
+    })}
+  </div>
+}
+
+function ScoreCelebration({ team }) {
+  const colors = ['#ff6940', '#ffd055', '#45b893', '#4d8bd2', '#9b67d5', '#ff8eb3']
+  return <div className={`score-celebration team-${team}`} aria-hidden="true">
+    <div className="celebration-callout"><Trophy /> {team === 0 ? 'A' : 'B'} 隊 +1！</div>
+    <div className="party-popper">🎉</div>
+    {Array.from({ length: 42 }, (_, i) => {
+      const direction = team === 0 ? 1 : -1
+      const spread = ((i * 37) % 240) + 30
+      const tx = direction * (spread + (i % 5) * 22)
+      const ty = -140 - ((i * 53) % 410)
+      return <i key={i} style={{
+        '--tx': `${tx}px`, '--ty': `${ty}px`, '--delay': `${(i % 7) * 0.025}s`,
+        '--spin': `${180 + (i % 6) * 90}deg`, '--color': colors[i % colors.length],
+      }} />
+    })}
+  </div>
+}
+
+function TeamScore({ team, score, color, celebrating, disabled, onAdd }) {
+  return <div className={`team-score ${color} ${celebrating ? 'celebrating' : ''}`}>
     <div className="team-badge"><Medal /><span>TEAM</span></div><h2>{team} 隊</h2>
-    <div className="score-number">{score}</div><span className="score-label">POINTS</span>
-    <button onClick={onAdd}><Check /> 答對 +1</button>
+    <div key={score} className="score-number">{score}</div><span className="score-label">POINTS</span>
+    <button disabled={disabled} onClick={onAdd}><Check /> 答對 +1</button>
   </div>
 }
 
