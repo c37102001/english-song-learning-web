@@ -339,6 +339,7 @@ function LearnMode({ course }) {
 function CompeteMode({ course }) {
   const [scores, setScores] = useState([0, 0])
   const [selectedGame, setSelectedGame] = useState('menu')
+  const [lyricsDifficulty, setLyricsDifficulty] = useState('easy')
   const [side, setSide] = useState('en')
   const [deck, setDeck] = useState(() => shuffleWords(course.words))
   const [cardIndex, setCardIndex] = useState(0)
@@ -382,7 +383,8 @@ function CompeteMode({ course }) {
     setGameEnded(true)
     setSettlementPhase('drum')
   }
-  const startFlashGame = () => {
+  const startFlashGame = (language = 'en') => {
+    setSide(language)
     setDeck(shuffleWords(course.words)); setCardIndex(0); setAnswer(false)
     setQuestionsComplete(false); setQuestionKey(k => k + 1); setSelectedGame('flash'); setDealing(true)
     setTimeout(() => setDealing(false), window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 80 : 1900)
@@ -404,10 +406,10 @@ function CompeteMode({ course }) {
     <div className="scoreboard">
       <TeamScore team="A" score={scores[0]} color="coral" disabled={gameEnded} celebrating={celebration?.team === 0} onAdd={() => add(0)} />
       <div className="challenge-center">
-        {gameEnded ? <CompetitionEnded onRestart={restartGame} /> : selectedGame === 'menu' ? <GameSelector onSelect={game => game === 'flash' ? startFlashGame() : setSelectedGame(game)} /> : selectedGame === 'match' ? <MatchCardsGame words={course.words} onScore={add} onBack={() => setSelectedGame('menu')} /> : <>
+        {gameEnded ? <CompetitionEnded onRestart={restartGame} /> : selectedGame === 'menu' ? <GameSelector onSelect={game => setSelectedGame(`intro-${game}`)} /> : selectedGame === 'intro-flash' ? <GameInstructions type="flash" onBack={() => setSelectedGame('menu')} onStart={startFlashGame} /> : selectedGame === 'intro-match' ? <GameInstructions type="match" onBack={() => setSelectedGame('menu')} onStart={() => setSelectedGame('match')} /> : selectedGame === 'intro-lyrics' ? <GameInstructions type="lyrics" onBack={() => setSelectedGame('menu')} onStart={difficulty => { setLyricsDifficulty(difficulty); setSelectedGame('lyrics') }} /> : selectedGame === 'match' ? <MatchCardsGame words={course.words} onScore={add} onBack={() => setSelectedGame('menu')} /> : selectedGame === 'lyrics' ? <LyricsOrderGame srt={course.srt} difficulty={lyricsDifficulty} onScore={add} onBack={() => setSelectedGame('menu')} /> : <>
           <button className="game-back-button" onClick={() => setSelectedGame('menu')}><ArrowLeft /> 選擇其他遊戲</button>
           <div className="round-label"><span>QUESTION</span><strong>{Math.min(cardIndex + 1, deck.length)} / {deck.length}</strong></div>
-          <div className="side-picker"><button disabled={dealing} className={side === 'en' ? 'active' : ''} onClick={() => { setSide('en'); setAnswer(false) }}>顯示英文</button><button disabled={dealing} className={side === 'zh' ? 'active' : ''} onClick={() => { setSide('zh'); setAnswer(false) }}>顯示中文</button></div>
+          <div className="question-language-badge">題目：{side === 'en' ? '英文' : '中文'}</div>
           <div className="competition-progress"><i style={{ width: `${questionsComplete ? 100 : ((cardIndex + 1) / deck.length) * 100}%` }} /></div>
           {dealing && <DealSequence words={deck} />}
           {!questionsComplete ? <div key={questionKey} className={`challenge-card ${dealing ? 'waiting' : ''}`}>
@@ -434,13 +436,139 @@ function GameSelector({ onSelect }) {
     <div className="game-options">
       <button onClick={() => onSelect('flash')}><span className="game-option-icon flash"><Sparkles /></span><div><strong>卡片搶答</strong><small>QUICK ANSWER</small><p>隨機出題，兩隊比速度搶答。</p></div><ChevronRight /></button>
       <button onClick={() => onSelect('match')}><span className="game-option-icon match"><Shuffle /></span><div><strong>Match Cards</strong><small>MEMORY MATCH</small><p>翻牌配對，再回答中文意思。</p></div><ChevronRight /></button>
+      <button onClick={() => onSelect('lyrics')}><span className="game-option-icon lyrics"><ListMusic /></span><div><strong>歌詞排序賽</strong><small>LYRIC SCRAMBLE</small><p>重組散落單字，還原正確歌詞。</p></div><ChevronRight /></button>
     </div>
     <div className="shared-score-note"><Trophy /> 所有遊戲共用左右兩隊的累計分數</div>
   </div>
 }
 
+const GAME_INSTRUCTIONS = {
+  flash: {
+    title: '卡片搶答', english: 'QUICK ANSWER', icon: Sparkles,
+    summary: '看清楚題目、搶先回答，考驗兩隊的反應速度！',
+    rules: [
+      ['搶先作答', '畫面每次會顯示一張中文或英文字卡，兩隊看到後立即搶答。'],
+      ['老師判定', '需要時可翻面顯示答案；回答正確後，由老師點隊伍的「答對 +1」。'],
+      ['題目不重複', '每張字卡只會出現一次，完成全部題目後即可選擇其他遊戲。'],
+    ],
+    tip: '開始後可隨時選擇顯示英文或中文題目。',
+  },
+  match: {
+    title: 'Match Cards', english: 'MEMORY MATCH', icon: Shuffle,
+    summary: '記住卡牌位置、找出相同單字，再答出中文意思！',
+    rules: [
+      ['選擇先攻', '老師先選擇 A 隊或 B 隊開始，每回合可指定兩張卡牌，例如 A1 和 D3。'],
+      ['翻牌配對', '兩張單字不同時會自動蓋回並換隊；單字相同則進入回答階段。'],
+      ['回答中文', '答錯會直接蓋牌並換隊；答對才顯示中文答案、加 1 分，而且原隊可以繼續翻牌。'],
+      ['完成遊戲', '找出全部 8 組配對後遊戲結束，累計分數會保留到下一個遊戲。'],
+    ],
+    tip: '請學生直接說出卡牌座標，老師再點選對應卡牌。',
+  },
+  lyrics: {
+    title: '歌詞排序賽', english: 'LYRIC SCRAMBLE', icon: ListMusic,
+    summary: '觀察散落的單字卡，搶先說出正確的完整歌詞！',
+    rules: [
+      ['觀察單字', '系統會依照選擇的難度，將一或兩句歌詞拆成單字卡並全部打亂。'],
+      ['舉手搶答', '兩隊學生看出正確順序後舉手，由老師選擇最快舉手的隊伍。'],
+      ['老師判定', '老師點選回答隊伍，再判定答對或答錯；判定後會揭曉正確歌詞。'],
+      ['累積得分', '回答正確的隊伍加 1 分，每句歌詞只會出現一次。'],
+    ],
+    tip: '卡片只改變位置與角度，每個單字都來自同一句歌詞。',
+  },
+}
+
+function GameInstructions({ type, onBack, onStart }) {
+  const game = GAME_INSTRUCTIONS[type]
+  const Icon = game.icon
+  const [questionLanguage, setQuestionLanguage] = useState('en')
+  const [lyricDifficulty, setLyricDifficulty] = useState('easy')
+  return <div className={`game-instructions ${type}`}>
+    <button className="game-back-button" onClick={onBack}><ArrowLeft /> 返回遊戲選單</button>
+    <div className="instruction-heading"><span><Icon /></span><div><small>{game.english}</small><h2>{game.title}</h2></div></div>
+    <p className="instruction-summary">{game.summary}</p>
+    {type === 'flash' && <div className="instruction-language"><div><strong>選擇題目語言</strong><span>開始後將使用這個設定出題</span></div><div><button className={questionLanguage === 'en' ? 'active' : ''} onClick={() => setQuestionLanguage('en')}>英文題目</button><button className={questionLanguage === 'zh' ? 'active' : ''} onClick={() => setQuestionLanguage('zh')}>中文題目</button></div></div>}
+    {type === 'lyrics' && <div className="instruction-language lyric-difficulty"><div><strong>選擇遊戲難度</strong><span>{lyricDifficulty === 'easy' ? '每題排列一句歌詞' : '每題同時排列兩句歌詞'}</span></div><div><button className={lyricDifficulty === 'easy' ? 'active' : ''} onClick={() => setLyricDifficulty('easy')}>簡單版</button><button className={lyricDifficulty === 'hard' ? 'active' : ''} onClick={() => setLyricDifficulty('hard')}>困難版</button></div></div>}
+    <div className="instruction-rules">
+      {game.rules.map(([title, description], index) => <div key={title}><span>{index + 1}</span><div><strong>{title}</strong><p>{description}</p></div></div>)}
+    </div>
+    <div className="instruction-tip"><CircleHelp /> {game.tip}</div>
+    <button className="start-game-button" onClick={() => onStart(type === 'lyrics' ? lyricDifficulty : questionLanguage)}><Play fill="currentColor" /> 開始遊戲</button>
+  </div>
+}
+
 function CompetitionEnded({ onRestart }) {
   return <div className="competition-ended"><span>🏁</span><small>COMPETITION ENDED</small><h2>本場比賽已結束</h2><p>成績已完成結算。準備好後，可以重新開始一場全新的比賽。</p><button onClick={onRestart}><RotateCcw /> 開始新比賽</button></div>
+}
+
+function LyricsOrderGame({ srt, difficulty, onScore, onBack }) {
+  const [rounds, setRounds] = useState([])
+  const [roundIndex, setRoundIndex] = useState(0)
+  const [answeringTeam, setAnsweringTeam] = useState(null)
+  const [result, setResult] = useState(null)
+  const [wrongNotice, setWrongNotice] = useState(false)
+  const [complete, setComplete] = useState(false)
+
+  useEffect(() => {
+    let active = true
+    fetch(`./${srt}`).then(response => response.text()).then(text => {
+      const usable = parseSrt(text).filter(line => {
+        const count = line.text.trim().split(/\s+/).length
+        return count >= 4 && count <= 14
+      })
+      const shuffled = shuffleWords(usable)
+      if (!active) return
+      if (difficulty === 'hard') {
+        const paired = []
+        for (let i = 0; i + 1 < shuffled.length; i += 2) paired.push({ id: `hard-${i}`, lines: [shuffled[i], shuffled[i + 1]] })
+        setRounds(paired)
+      } else {
+        setRounds(shuffled.map((line, index) => ({ id: `easy-${index}`, lines: [line] })))
+      }
+    })
+    return () => { active = false }
+  }, [srt, difficulty])
+
+  const round = rounds[roundIndex]
+  const words = useMemo(() => {
+    if (!round) return []
+    const wordCards = round.lines.flatMap((line, lineNumber) => line.text.trim().split(/\s+/).map((text, index) => ({ id: `${roundIndex}-${lineNumber}-${index}`, text })))
+    return shuffleWords(wordCards)
+  }, [round, roundIndex])
+  const judge = correct => {
+    if (correct) {
+      onScore(answeringTeam)
+      setResult('correct')
+      setWrongNotice(false)
+    } else {
+      setAnsweringTeam(null)
+      setResult(null)
+      setWrongNotice(true)
+    }
+  }
+  const nextLine = () => {
+    if (roundIndex >= rounds.length - 1) return setComplete(true)
+    setRoundIndex(index => index + 1); setAnsweringTeam(null); setResult(null); setWrongNotice(false)
+  }
+
+  if (!round) return <div className="lyrics-order-game loading-game"><Music2 /><h2>正在準備歌詞…</h2></div>
+  return <div className="lyrics-order-game">
+    <button className="game-back-button" onClick={onBack}><ArrowLeft /> 選擇其他遊戲</button>
+    <div className="lyrics-game-heading"><div><small>LYRIC SCRAMBLE · {difficulty === 'hard' ? '困難版' : '簡單版'}</small><strong>歌詞排序賽</strong></div><span>第 {Math.min(roundIndex + 1, rounds.length)} / {rounds.length} 題</span></div>
+    <div className="lyrics-game-progress"><i style={{ width: `${complete ? 100 : ((roundIndex + 1) / rounds.length) * 100}%` }} /></div>
+    {!complete ? <>
+      <div key={roundIndex} className={`scattered-word-stage ${difficulty} ${result ? 'answered' : ''}`}>
+        {words.map((word, index) => {
+          const angle = ((index * 47 + roundIndex * 31) % 121) - 60
+          const x = ((index * 29 + roundIndex * 11) % 17) - 8
+          const y = ((index * 43 + roundIndex * 7) % 15) - 7
+          return <span key={word.id} style={{ '--angle': `${angle}deg`, '--x': `${x}px`, '--y': `${y}px`, '--delay': `${index * .045}s` }}>{word.text}</span>
+        })}
+      </div>
+      {!result && answeringTeam === null && <div className={`lyrics-buzzer ${wrongNotice ? 'retry' : ''}`}><p>{wrongNotice ? '答錯，繼續搶答！' : '哪一隊最快舉手？'}</p><div><button onClick={() => { setAnsweringTeam(0); setWrongNotice(false) }}>A 隊搶答</button><button onClick={() => { setAnsweringTeam(1); setWrongNotice(false) }}>B 隊搶答</button></div></div>}
+      {!result && answeringTeam !== null && <div className={`lyrics-judging team-${answeringTeam}`}><span>{answeringTeam === 0 ? 'A' : 'B'} 隊回答中</span><div><button onClick={() => judge(false)}><X /> 答錯</button><button onClick={() => judge(true)}><Check /> 答對 +1</button></div></div>}
+      {result && <div className={`lyric-result ${result}`}><div><span>{result === 'correct' ? <Check /> : <X />}</span><div><small>{result === 'correct' ? `${answeringTeam === 0 ? 'A' : 'B'} 隊答對！` : '回答錯誤'}</small><span className="ordered-lyrics">{round.lines.map((line, index) => <strong key={index}>{index + 1}. {line.text}</strong>)}</span></div></div><button onClick={nextLine}>{roundIndex === rounds.length - 1 ? '完成遊戲' : '下一題'} <ChevronRight /></button></div>}
+    </> : <div className="lyrics-game-complete"><span>🎵</span><small>ALL LYRICS COMPLETE</small><h2>歌詞排序完成！</h2><p>{rounds.length} 題歌詞都已經挑戰完畢，可以選擇其他遊戲。</p><button onClick={onBack}><ListMusic /> 選擇其他遊戲</button></div>}
+  </div>
 }
 
 function createMatchCards(words) {
@@ -499,7 +627,8 @@ function MatchCardsGame({ words, onScore, onBack }) {
     <div className="match-board">
       {cards.map((card, index) => {
         const isOpen = opened.includes(index) || card.matched
-        return <button key={card.uid} disabled={currentTeam === null || card.matched} onClick={() => chooseCard(index)} className={`match-card ${isOpen ? 'open' : ''} ${card.matched ? 'matched' : ''}`}><span className="match-card-inner"><span className="match-card-cover"><Music2 /><b>?</b></span><span className="match-card-face"><small>EN</small><strong>{card.word.en}</strong>{card.matched && <Check />}</span></span></button>
+        const coordinate = `${String.fromCharCode(65 + Math.floor(index / 4))}${index % 4 + 1}`
+        return <button key={card.uid} aria-label={`卡牌 ${coordinate}`} disabled={currentTeam === null || card.matched} onClick={() => chooseCard(index)} className={`match-card ${isOpen ? 'open' : ''} ${card.matched ? 'matched' : ''}`}><span className="match-card-inner"><span className="match-card-cover"><span className="card-coordinate">{coordinate}</span><Music2 /><b>?</b></span><span className="match-card-face"><span className="card-coordinate">{coordinate}</span><small>EN</small><strong>{card.word.en}</strong>{card.matched && <Check />}</span></span></button>
       })}
     </div>
     {currentTeam === null && <div className="starter-overlay"><h2>哪一隊先開始？</h2><div><button onClick={() => setCurrentTeam(0)}>A 隊先攻</button><button onClick={() => setCurrentTeam(1)}>B 隊先攻</button></div></div>}
