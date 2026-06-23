@@ -267,8 +267,9 @@ function LearnMode({ course }) {
   const [favorites, toggleFavorite] = useFavorites(course.id)
   const [onlyStarred, setOnlyStarred] = useState(false)
   const [shuffle, setShuffle] = useState(false)
-  const [beginner, setBeginner] = useState(false)
-  const [frontLanguage, setFrontLanguage] = useState('zh')
+  const [showHints, setShowHints] = useState(true)
+  const [autoPronounce, setAutoPronounce] = useState(true)
+  const [frontLanguage, setFrontLanguage] = useState('en')
   const [index, setIndex] = useState(0)
   const [flipped, setFlipped] = useState(false)
   const [hintStep, setHintStep] = useState(0)
@@ -283,17 +284,26 @@ function LearnMode({ course }) {
   const prev = () => resetCard((index - 1 + words.length) % words.length)
   const speak = (text) => { speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(text); u.lang = 'en-US'; u.rate = .82; speechSynthesis.speak(u) }
   const reveal = () => {
-    if (!beginner) return setFlipped(v => !v)
+    if (!showHints) return setFlipped(v => !v)
     if (!flipped && hintStep < 3) setHintStep(v => v + 1)
     else setFlipped(v => !v)
   }
+
+  useEffect(() => {
+    if (!word || !autoPronounce) return
+    const englishIsVisible = (!flipped && (showHints || frontLanguage === 'en')) || (flipped && !showHints && frontLanguage === 'zh')
+    if (!englishIsVisible) return
+    const timer = setTimeout(() => speak(word.en), 180)
+    return () => clearTimeout(timer)
+  }, [word?.id, flipped, showHints, frontLanguage, autoPronounce])
 
   return <section className="learn-mode">
     <div className="learn-top">
       <div className="mode-heading"><span className="round-icon mint"><BookOpen /></span><div><span>LEARN WITH CARDS</span><h1>單字字卡</h1></div></div>
       <div className="study-settings">
-        <label><span>初學模式<small>使用三階段提示</small></span><input type="checkbox" checked={beginner} onChange={e => { setBeginner(e.target.checked); setFlipped(false); setHintStep(0) }} /><i /></label>
-        {!beginner && <div className="front-language-setting"><span>字卡正面</span><div className="segmented"><button className={frontLanguage === 'zh' ? 'active' : ''} onClick={() => { setFrontLanguage('zh'); setFlipped(false) }}>中文</button><button className={frontLanguage === 'en' ? 'active' : ''} onClick={() => { setFrontLanguage('en'); setFlipped(false) }}>英文</button></div></div>}
+        <label><span>顯示提示<small>使用三階段提示</small></span><input type="checkbox" checked={showHints} onChange={e => { setShowHints(e.target.checked); setFlipped(false); setHintStep(0) }} /><i /></label>
+        <label><span>自動發音<small>顯示英文時朗讀</small></span><input type="checkbox" checked={autoPronounce} onChange={e => setAutoPronounce(e.target.checked)} /><i /></label>
+        {!showHints && <div className="front-language-setting"><span>字卡正面</span><div className="segmented"><button className={frontLanguage === 'zh' ? 'active' : ''} onClick={() => { setFrontLanguage('zh'); setFlipped(false) }}>中文</button><button className={frontLanguage === 'en' ? 'active' : ''} onClick={() => { setFrontLanguage('en'); setFlipped(false) }}>英文</button></div></div>}
         <div className="segmented"><button className={!onlyStarred ? 'active' : ''} onClick={() => setOnlyStarred(false)}>全部 {course.words.length}</button><button className={onlyStarred ? 'active' : ''} onClick={() => setOnlyStarred(true)}><Star size={15} fill={onlyStarred ? 'currentColor' : 'none'} /> 星號 {favorites.length}</button></div>
         <button className={`icon-text-button ${shuffle ? 'active' : ''}`} onClick={() => setShuffle(v => !v)}><Shuffle size={17} /> 隨機</button>
       </div>
@@ -305,16 +315,16 @@ function LearnMode({ course }) {
         <button className="nav-card prev" onClick={prev}><ChevronLeft /></button>
         <div className={`flashcard ${flipped ? 'flipped' : ''}`} onClick={reveal} role="button" tabIndex="0">
           <div className="card-face card-front">
-            <div className="card-label"><span>{beginner || frontLanguage === 'en' ? '英文' : '中文'}</span><button onClick={e => { e.stopPropagation(); toggleFavorite(word.id) }} aria-label="加星號"><Star fill={favorites.includes(word.id) ? 'currentColor' : 'none'} /></button></div>
+            <div className="card-label"><span>{showHints || frontLanguage === 'en' ? '英文' : '中文'}</span><button onClick={e => { e.stopPropagation(); toggleFavorite(word.id) }} aria-label="加星號"><Star fill={favorites.includes(word.id) ? 'currentColor' : 'none'} /></button></div>
             <div className="word-main">
-              {beginner || frontLanguage === 'en' ? <><small>{word.part}</small><h2>{word.en}</h2><button className="speak" onClick={e => { e.stopPropagation(); speak(word.en) }}><Volume2 /> 聽發音</button></> : <><small>{word.part}</small><h2>{word.zh}</h2></>}
+              {showHints || frontLanguage === 'en' ? <><small>{word.part}</small><h2>{word.en}</h2><button className="speak" onClick={e => { e.stopPropagation(); speak(word.en) }}><Volume2 /> 聽發音</button></> : <><small>{word.part}</small><h2>{word.zh}</h2></>}
             </div>
-            {beginner && hintStep > 0 && <div className="hint-area"><span>提示 {hintStep}/3</span>{word.hint.slice(0, hintStep).map((h, i) => <p key={i}>{i + 1}. {h}</p>)}</div>}
-            <div className="flip-hint"><RotateCcw size={16} /> {beginner && hintStep < 3 ? '點一下顯示下一個提示' : '點一下翻面看答案'}</div>
+            {showHints && hintStep > 0 && <div className="hint-area"><div><CircleHelp size={18} /><span>提示 {hintStep} / 3</span></div>{word.hint.slice(0, hintStep).map((h, i) => <p key={i}><b>{i + 1}</b><span>{h}</span></p>)}</div>}
+            <div className="flip-hint"><RotateCcw size={16} /> {showHints && hintStep < 3 ? '點一下顯示下一個提示' : '點一下翻面看答案'}</div>
           </div>
           <div className="card-face card-back">
-            <div className="card-label"><span>{beginner || frontLanguage === 'en' ? '中文答案' : '英文答案'}</span><Check /></div>
-            <div className="word-main"><small>{word.part}</small><h2>{beginner || frontLanguage === 'en' ? word.zh : word.en}</h2>{!beginner && frontLanguage === 'zh' && <button className="speak" onClick={e => { e.stopPropagation(); speak(word.en) }}><Volume2 /> 聽發音</button>}<p className="example">“{word.example}”</p></div>
+            <div className="card-label"><span>{showHints || frontLanguage === 'en' ? '中文答案' : '英文答案'}</span><Check /></div>
+            <div className="word-main"><small>{word.part}</small><h2>{showHints || frontLanguage === 'en' ? word.zh : word.en}</h2>{!showHints && frontLanguage === 'zh' && <button className="speak" onClick={e => { e.stopPropagation(); speak(word.en) }}><Volume2 /> 聽發音</button>}<p className="example">“{word.example}”</p></div>
             <div className="flip-hint"><RotateCcw size={16} /> 點一下回到正面</div>
           </div>
         </div>
