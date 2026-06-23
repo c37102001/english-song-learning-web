@@ -1,0 +1,60 @@
+[
+  {
+    "id": "you-are-my-sunshine",
+    "title": "You Are My Sunshine",
+    "artist": "Jimmie Davis",
+    "level": "初級",
+    "duration": "2:18",
+    "youtubeId": "5TUzB2fBUpY",
+    "srt": "data/you-are-my-sunshine.srt",
+    "cover": "https://images.unsplash.com/photo-1490750967868-88aa4486c946?auto=format&fit=crop&w=1200&q=85",
+    "color": "#f6a43b",
+    "description": "用溫暖熟悉的旋律，學習表達喜愛、天氣與日常情感。",
+    "words": [
+      {"id":"sunshine","en":"sunshine","zh":"陽光","part":"noun","example":"You are my sunshine.","hint":["☀️","天空中暖暖的光","雨天過後最期待看見它"]},
+      {"id":"happy","en":"happy","zh":"快樂的","part":"adjective","example":"You make me happy.","hint":["😊","心情很好時的感覺","「開心」的英文形容詞"]},
+      {"id":"dream","en":"dream","zh":"夢；夢想","part":"noun / verb","example":"I dreamed I held you.","hint":["🌙💭","睡覺時腦中的故事","也可以指未來想實現的願望"]},
+      {"id":"awake","en":"awake","zh":"醒著的；醒來","part":"adjective / verb","example":"When I awoke, dear.","hint":["👀🌅","不是睡著的狀態","早晨張開眼睛"]},
+      {"id":"dear","en":"dear","zh":"親愛的","part":"adjective / noun","example":"Please don't take my sunshine away, dear.","hint":["💛","對重視的人親暱的稱呼","信件開頭常見的稱呼"]},
+      {"id":"know","en":"know","zh":"知道；了解","part":"verb","example":"You'll never know, dear.","hint":["🧠💡","腦中擁有某個資訊","不是猜測，而是確定明白"]},
+      {"id":"love","en":"love","zh":"愛；喜愛","part":"noun / verb","example":"How much I love you.","hint":["❤️","對人或事物很深的感情","比 like 更強烈的喜歡"]},
+      {"id":"take-away","en":"take away","zh":"帶走；拿走","part":"phrasal verb","example":"Please don't take my sunshine away.","hint":["🤲➡️","讓某樣東西離開原處","把原本在這裡的東西拿走"]}
+    ]
+  },
+  {
+    "id": "count-on-me",
+    "title": "Count on Me",
+    "artist": "Bruno Mars",
+    "level": "中級",
+    "duration": "3:17",
+    "youtubeId": "6k8cpUkKK4c",
+    "srt": "data/count-on-me.srt",
+    "cover": "https://images.unsplash.com/photo-1506869640319-fe1a24fd76dc?auto=format&fit=crop&w=1200&q=85",
+    "color": "#42a88a",
+    "description": "在輕快的友情歌曲中，認識承諾、陪伴和互助的實用說法。",
+    "words": [
+      {"id":"count-on","en":"count on","zh":"依靠；信賴","part":"phrasal verb","example":"You can count on me.","hint":["🤝","相信某人會提供幫助","需要時可以依賴某人"]},
+      {"id":"stuck","en":"stuck","zh":"受困的；卡住的","part":"adjective","example":"If you ever find yourself stuck.","hint":["🧗","無法前進或離開","像拉不開的抽屜一樣卡住"]},
+      {"id":"guide","en":"guide","zh":"引導；嚮導","part":"verb / noun","example":"I'll be the light to guide you.","hint":["🧭","帶領某人找到方向","旅行時帶路的人"]},
+      {"id":"friend","en":"friend","zh":"朋友","part":"noun","example":"That's what friends are supposed to do.","hint":["🫂","一起分享生活的人","不是陌生人，也不一定是家人"]}
+    ]
+  },
+  {
+    "id": "what-a-wonderful-world",
+    "title": "What a Wonderful World",
+    "artist": "Louis Armstrong",
+    "level": "中級",
+    "duration": "2:19",
+    "youtubeId": "rBrd_3VMC3c",
+    "srt": "data/wonderful-world.srt",
+    "cover": "https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?auto=format&fit=crop&w=1200&q=85",
+    "color": "#4a88c7",
+    "description": "從自然與生活景色出發，練習顏色、觀察與讚嘆的表達方式。",
+    "words": [
+      {"id":"wonderful","en":"wonderful","zh":"美好的；精彩的","part":"adjective","example":"What a wonderful world.","hint":["🌈✨","好到令人讚嘆","比 good 更強烈的稱讚"]},
+      {"id":"bloom","en":"bloom","zh":"開花","part":"verb","example":"I see them bloom.","hint":["🌷","花朵展開的動作","植物長出美麗花朵"]},
+      {"id":"blessed","en":"blessed","zh":"幸福的；受祝福的","part":"adjective","example":"The blessed day.","hint":["🙏✨","感到幸運與幸福","得到美好祝福的狀態"]},
+      {"id":"grow","en":"grow","zh":"成長；生長","part":"verb","example":"I watch them grow.","hint":["🌱➡️🌳","從小慢慢變大","植物和孩子都會做的事"]}
+    ]
+  }
+]
