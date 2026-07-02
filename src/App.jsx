@@ -239,6 +239,7 @@ function useYouTube(youtubeId) {
   const playerRef = useRef(null)
   const [ready, setReady] = useState(false)
   const [playing, setPlaying] = useState(false)
+  const [ended, setEnded] = useState(false)
   const [time, setTime] = useState(0)
   const [duration, setDuration] = useState(0)
   const elementId = useMemo(() => `youtube-player-${youtubeId}`, [youtubeId])
@@ -253,7 +254,14 @@ function useYouTube(youtubeId) {
         playerVars: { rel: 0, modestbranding: 1, playsinline: 1 },
         events: {
           onReady: e => { setReady(true); setDuration(e.target.getDuration()) },
-          onStateChange: e => setPlaying(e.data === window.YT.PlayerState.PLAYING),
+          onStateChange: e => {
+            setPlaying(e.data === window.YT.PlayerState.PLAYING)
+            if (e.data === window.YT.PlayerState.PLAYING) setEnded(false)
+            if (e.data === window.YT.PlayerState.ENDED) {
+              setEnded(true)
+              setTime(0)
+            }
+          },
         },
       })
     }
@@ -275,9 +283,16 @@ function useYouTube(youtubeId) {
     playerRef.current?.seekTo?.(t, true)
     playerRef.current?.playVideo?.()
     setTime(t)
+    setEnded(false)
   }
-  const toggle = () => playing ? playerRef.current?.pauseVideo?.() : playerRef.current?.playVideo?.()
-  return { elementId, ready, playing, time, duration, seek, seekAndPlay, toggle }
+  const pause = () => playerRef.current?.pauseVideo?.()
+  const toggle = () => {
+    if (playing) return pause()
+    if (ended) playerRef.current?.seekTo?.(0, true)
+    playerRef.current?.playVideo?.()
+    setEnded(false)
+  }
+  return { elementId, ready, playing, ended, time, duration, seek, seekAndPlay, toggle, pause }
 }
 
 const formatTime = seconds => `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`
@@ -419,6 +434,7 @@ function LearnMode({ course }) {
 
 function CompeteMode({ course }) {
   const courseWords = course.words || []
+  const bgm = useYouTube('3BTPdeXdLeU')
   const [scores, setScores] = useState([0, 0])
   const [selectedGame, setSelectedGame] = useState('menu')
   const [lyricsDifficulty, setLyricsDifficulty] = useState('easy')
@@ -464,9 +480,11 @@ function CompeteMode({ course }) {
   }
   const add = team => {
     setScores(s => s.map((n, i) => i === team ? n + 1 : n))
+    playScoreSound()
     setCelebration({ team, id: Date.now() })
   }
   const settleGame = () => {
+    bgm.pause()
     setGameEnded(true)
     setSettlementPhase('drum')
   }
@@ -488,10 +506,12 @@ function CompeteMode({ course }) {
     <div className="compete-heading">
       <div className="mode-heading"><span className="round-icon blue"><Trophy /></span><div><span>CLASSROOM CHALLENGE</span><h1>雙隊搶答賽</h1></div></div>
       <div className="compete-header-actions">
+        <button className={`bgm-button ${bgm.playing ? 'active' : ''}`} disabled={!bgm.ready} onClick={bgm.toggle}>{bgm.playing ? <Pause size={16} /> : <Play size={16} />} 背景音樂 {bgm.playing ? '暫停' : '播放'}</button>
         <button className="reset-button" onClick={() => setConfirmReset(true)}><RotateCcw size={16} /> 重設比分</button>
         <button className="settle-button" disabled={gameEnded} onClick={settleGame}><Trophy size={17} /> 結算成績</button>
       </div>
     </div>
+    <div className="background-youtube-player" aria-hidden="true"><div id={bgm.elementId} /></div>
     <div className="scoreboard">
       <TeamScore team="A" score={scores[0]} color="coral" disabled={gameEnded} celebrating={celebration?.team === 0} onAdd={() => add(0)} />
       <div className="challenge-center">
@@ -737,31 +757,113 @@ function playDrumRoll() {
   const AudioContext = window.AudioContext || window.webkitAudioContext
   if (!AudioContext) return
   const context = new AudioContext()
+  const compressor = context.createDynamicsCompressor()
+  compressor.threshold.value = -18
+  compressor.knee.value = 16
+  compressor.ratio.value = 8
+  compressor.attack.value = .004
+  compressor.release.value = .18
   const master = context.createGain()
-  master.gain.value = .18
-  master.connect(context.destination)
-  const noise = context.createBuffer(1, context.sampleRate * .08, context.sampleRate)
+  master.gain.value = .9
+  master.connect(compressor)
+  compressor.connect(context.destination)
+  const noise = context.createBuffer(1, context.sampleRate * .11, context.sampleRate)
   const data = noise.getChannelData(0)
   for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1
   const start = context.currentTime + .05
-  for (let i = 0; i < 30; i++) {
+  const hit = (time, volume = .7, frequency = 760, length = .09) => {
     const source = context.createBufferSource()
     const gain = context.createGain()
     const filter = context.createBiquadFilter()
-    source.buffer = noise; filter.type = 'lowpass'; filter.frequency.value = 650
-    const time = start + i * (.11 - i * .0018)
-    gain.gain.setValueAtTime(0, time); gain.gain.linearRampToValueAtTime(.6 + i / 70, time + .008); gain.gain.exponentialRampToValueAtTime(.01, time + .075)
+    source.buffer = noise
+    filter.type = 'bandpass'
+    filter.frequency.value = frequency
+    filter.Q.value = .9
+    gain.gain.setValueAtTime(0.0001, time)
+    gain.gain.linearRampToValueAtTime(volume, time + .006)
+    gain.gain.exponentialRampToValueAtTime(0.0001, time + length)
     source.connect(filter); filter.connect(gain); gain.connect(master); source.start(time)
   }
-  const finale = start + 2.65
-  ;[523.25, 659.25, 783.99].forEach((frequency, i) => {
-    const oscillator = context.createOscillator(); const gain = context.createGain()
-    oscillator.type = i === 0 ? 'triangle' : 'sine'; oscillator.frequency.value = frequency
-    gain.gain.setValueAtTime(0, finale); gain.gain.linearRampToValueAtTime(.45, finale + .025); gain.gain.exponentialRampToValueAtTime(.01, finale + 1.1)
-    oscillator.connect(gain); gain.connect(master); oscillator.start(finale); oscillator.stop(finale + 1.15)
+  const boom = (time, frequency = 82, volume = .85) => {
+    const oscillator = context.createOscillator()
+    const gain = context.createGain()
+    oscillator.type = 'sine'
+    oscillator.frequency.setValueAtTime(frequency * 1.8, time)
+    oscillator.frequency.exponentialRampToValueAtTime(frequency, time + .12)
+    gain.gain.setValueAtTime(0.0001, time)
+    gain.gain.linearRampToValueAtTime(volume, time + .012)
+    gain.gain.exponentialRampToValueAtTime(0.0001, time + .42)
+    oscillator.connect(gain); gain.connect(master); oscillator.start(time); oscillator.stop(time + .46)
+  }
+  for (let i = 0; i < 38; i++) {
+    const progress = i / 37
+    const spacing = .115 - progress * .055
+    const time = start + i * spacing
+    hit(time, .9 + progress * .7, 580 + progress * 720, .085)
+    if (i % 4 === 0) boom(time, 74 + progress * 18, .75 + progress * .45)
+  }
+  const build = start + 2.18
+  ;[0, .14, .26, .36].forEach((offset, i) => {
+    hit(build + offset, 1.4 + i * .18, 1100 + i * 220, .12)
+    boom(build + offset, 92 + i * 12, .95)
   })
-  const closeTimer = setTimeout(() => context.close(), 4300)
+  const finale = start + 2.65
+  const chord = [261.63, 329.63, 392, 523.25, 659.25, 783.99, 1046.5]
+  chord.forEach((frequency, i) => {
+    const oscillator = context.createOscillator()
+    const gain = context.createGain()
+    oscillator.type = i < 3 ? 'triangle' : 'sine'
+    oscillator.frequency.value = frequency
+    gain.gain.setValueAtTime(0.0001, finale)
+    gain.gain.linearRampToValueAtTime(i < 3 ? .95 : .72, finale + .035)
+    gain.gain.exponentialRampToValueAtTime(0.0001, finale + 1.35)
+    oscillator.connect(gain); gain.connect(master); oscillator.start(finale); oscillator.stop(finale + 1.45)
+  })
+  ;[523.25, 659.25, 783.99, 1046.5].forEach((frequency, i) => {
+    const time = finale + i * .12
+    const oscillator = context.createOscillator()
+    const gain = context.createGain()
+    oscillator.type = 'square'
+    oscillator.frequency.value = frequency
+    gain.gain.setValueAtTime(0.0001, time)
+    gain.gain.linearRampToValueAtTime(.68, time + .015)
+    gain.gain.exponentialRampToValueAtTime(0.0001, time + .24)
+    oscillator.connect(gain); gain.connect(master); oscillator.start(time); oscillator.stop(time + .28)
+  })
+  boom(finale, 60, 1.45)
+  const closeTimer = setTimeout(() => context.close(), 4800)
   return () => { clearTimeout(closeTimer); setTimeout(() => context.close().catch(() => {}), 1200) }
+}
+
+function playScoreSound() {
+  const AudioContext = window.AudioContext || window.webkitAudioContext
+  if (!AudioContext) return
+  const context = new AudioContext()
+  const master = context.createGain()
+  master.gain.value = .45
+  master.connect(context.destination)
+  const start = context.currentTime + .01
+  ;[523.25, 659.25, 783.99, 1046.5].forEach((frequency, index) => {
+    const time = start + index * .075
+    const oscillator = context.createOscillator()
+    const harmony = context.createOscillator()
+    const gain = context.createGain()
+    oscillator.type = 'triangle'
+    harmony.type = 'square'
+    oscillator.frequency.value = frequency
+    harmony.frequency.value = frequency * 2
+    gain.gain.setValueAtTime(0.0001, time)
+    gain.gain.linearRampToValueAtTime(.85, time + .012)
+    gain.gain.exponentialRampToValueAtTime(0.0001, time + .24)
+    oscillator.connect(gain)
+    harmony.connect(gain)
+    gain.connect(master)
+    oscillator.start(time)
+    harmony.start(time)
+    oscillator.stop(time + .28)
+    harmony.stop(time + .28)
+  })
+  setTimeout(() => context.close().catch(() => {}), 850)
 }
 
 function ResultCeremony({ phase, scores, onClose, onRestart }) {
