@@ -61,12 +61,18 @@ Each course document contains:
 
 - `title`: required string
 - `artist`: optional string
-- `level`: optional string
-- `duration`: optional string
-- `youtubeId`: YouTube video ID
+- `level`: `初級`, `中級`, or `高級`; required before publishing
+- `youtubeUrl`: YouTube video URL
 - `status`: `draft` or `published`
-- `color`: UI color
 - `srtText`: full SRT content
-- `words`: array of word cards
+- `translations`: optional array of Chinese lyric translations; one item per SRT lyric line
+- `words`: array of word cards; each word can include `en`, `zh`, `part`, `example`, `exampleZh`, and optional `hint`
+
+Before publishing a course, each word must include `en`, `zh`, `part`, and `exampleZh`. The three hints are optional.
 
 Only `published` courses are visible on the student-facing site.
+
+The admin page supports two editing modes:
+
+- Form editing: edit fields one by one.
+- JSON editing: edit `course.json`, `srt.json`, and `words.json` separately. These three JSON blocks are saved back into the same Firestore course document.

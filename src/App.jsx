@@ -5,7 +5,7 @@ import {
 } from 'firebase/firestore'
 import {
   ArrowLeft, BookOpen, Check, ChevronLeft, ChevronRight, CircleHelp,
-  Clock3, Flame, Headphones, ListMusic, LogOut, Medal, Music2, Pause,
+  Flame, Headphones, ListMusic, LogOut, Medal, Music2, Pause,
   Play, Plus, RotateCcw, Save, Search, Shuffle, Sparkles, Star, Trash2, Trophy, Volume2, X,
 } from 'lucide-react'
 import { auth, db, firebaseReady } from './firebase'
@@ -14,6 +14,16 @@ const MODES = [
   { id: 'listen', label: '聆聽', icon: Headphones },
   { id: 'learn', label: '學習', icon: BookOpen },
   { id: 'compete', label: '比賽', icon: Trophy },
+]
+
+const LEVEL_OPTIONS = ['初級', '中級', '高級']
+const PART_OPTIONS = [
+  ['noun', 'noun 名詞'],
+  ['verb', 'verb 動詞'],
+  ['adjective', 'adjective 形容詞'],
+  ['adverb', 'adverb 副詞'],
+  ['preposition', 'preposition 介系詞'],
+  ['phrase', 'phrase 片語'],
 ]
 
 function useHashRoute() {
@@ -74,23 +84,22 @@ function courseFromDoc(snapshot) {
     title: data.title || '',
     artist: data.artist || '',
     level: data.level || '',
-    duration: data.duration || '',
-    youtubeId: data.youtubeId || '',
+    youtubeUrl: data.youtubeUrl || youtubeUrlFromId(data.youtubeId || ''),
     srtText: data.srtText || '',
-    color: data.color || '#6d74d8',
+    translations: normalizeTranslations(data.translations),
     status: data.status || 'draft',
     order: data.order ?? 9999,
     words: Array.isArray(data.words) ? data.words.map(normalizeWord) : [],
   }
 }
 
-function normalizeWord(word, index = 0) {
+function normalizeWord(word) {
   return {
-    id: word.id || slugify(word.en || `word-${index}`),
     en: word.en || '',
     zh: word.zh || '',
     part: word.part || '',
     example: word.example || '',
+    exampleZh: word.exampleZh || '',
     hint: Array.isArray(word.hint) ? word.hint : ['', '', ''],
   }
 }
@@ -109,7 +118,7 @@ function Brand({ compact = false }) {
   </a>
 }
 
-const youtubeThumbnail = youtubeId => `https://img.youtube.com/vi/${youtubeId}/hqdefault.jpg`
+const youtubeThumbnail = youtubeUrl => `https://img.youtube.com/vi/${extractYoutubeId(youtubeUrl)}/hqdefault.jpg`
 
 function Home({ courses }) {
   const [search, setSearch] = useState('')
@@ -183,16 +192,16 @@ function Home({ courses }) {
 }
 
 function SongCard({ course, index }) {
+  const hasYoutube = !!extractYoutubeId(course.youtubeUrl)
   return <a className="song-card" href={`#/${course.id}/listen`}>
     <div className="cover-wrap">
-      {course.youtubeId ? <img src={youtubeThumbnail(course.youtubeId)} alt={`${course.title} YouTube 縮圖`} /> : <div className="missing-thumbnail"><Music2 /><span>尚未設定 YouTube</span></div>}
+      {hasYoutube ? <img src={youtubeThumbnail(course.youtubeUrl)} alt={`${course.title} YouTube 縮圖`} /> : <div className="missing-thumbnail"><Music2 /><span>尚未設定 YouTube</span></div>}
       {course.level && <span className="level">{course.level}</span>}
       <span className="card-play"><Play fill="currentColor" /></span>
       <span className="track-num">0{index + 1}</span>
     </div>
     <div className="song-meta">
       <div><h3>{course.title}</h3><p>{course.artist}</p></div>
-      {course.duration && <span><Clock3 size={14} /> {course.duration}</span>}
     </div>
     <div className="card-foot"><span><BookOpen size={15} /> {course.words?.length || 0} 個單字</span><span>開始學習 <ArrowLeft className="go-arrow" size={16} /></span></div>
   </a>
@@ -200,10 +209,11 @@ function SongCard({ course, index }) {
 
 function Course({ course, mode }) {
   const selectedMode = MODES.some(m => m.id === mode) ? mode : 'listen'
+  const hasYoutube = !!extractYoutubeId(course.youtubeUrl)
   return <div className="course-page">
     <header className="course-header">
       <Brand compact />
-      <div className="course-title">{course.youtubeId ? <img src={youtubeThumbnail(course.youtubeId)} alt={`${course.title} YouTube 縮圖`} /> : <span className="mini-placeholder"><Music2 size={17} /></span>}<div><small>正在學習</small><strong>{course.title}</strong></div></div>
+      <div className="course-title">{hasYoutube ? <img src={youtubeThumbnail(course.youtubeUrl)} alt={`${course.title} YouTube 縮圖`} /> : <span className="mini-placeholder"><Music2 size={17} /></span>}<div><small>正在學習</small><strong>{course.title}</strong></div></div>
       <a href="#/" className="exit-link"><X size={18} /> 離開課程</a>
     </header>
     <nav className="mode-tabs">
@@ -276,8 +286,12 @@ function ListenMode({ course }) {
   const [lyrics, setLyrics] = useState([])
   const lyricsViewportRef = useRef(null)
   const lyricRefs = useRef([])
-  const { elementId, ready, playing, time, duration, seek, seekAndPlay, toggle } = useYouTube(course.youtubeId)
-  useEffect(() => { setLyrics(course.srtText ? parseSrt(course.srtText) : []) }, [course.srtText])
+  const youtubeId = extractYoutubeId(course.youtubeUrl)
+  const { elementId, ready, playing, time, duration, seek, seekAndPlay, toggle } = useYouTube(youtubeId)
+  useEffect(() => {
+    const lines = course.srtText ? parseSrt(course.srtText) : []
+    setLyrics(lines.map((line, index) => ({ ...line, translation: course.translations?.[index] || '' })))
+  }, [course.srtText, course.translations])
   const active = lyrics.findIndex((line, i) => time >= line.start && time < (line.end || lyrics[i + 1]?.start))
 
   useEffect(() => {
@@ -291,7 +305,7 @@ function ListenMode({ course }) {
     })
   }, [active, playing])
 
-  if (!course.youtubeId) return <section className="empty-mode"><Music2 /><h2>這首課程還沒有 YouTube 影片</h2><p>請到課程後台填入 YouTube 連結或影片 ID。</p></section>
+  if (!youtubeId) return <section className="empty-mode"><Music2 /><h2>這首課程還沒有 YouTube 影片</h2><p>請到課程後台填入 YouTube 連結。</p></section>
 
   return <section className="listen-layout">
     <div className="player-panel">
@@ -312,7 +326,7 @@ function ListenMode({ course }) {
       <div className="lyrics-viewport" ref={lyricsViewportRef}>
         <div className="lyrics-list">
           {lyrics.map((line, i) => <button ref={el => { lyricRefs.current[i] = el }} key={`${line.start}-${i}`} onClick={() => seekAndPlay(line.start)} className={i === active ? 'active' : ''}>
-            <span>{String(i + 1).padStart(2, '0')}</span><p>{line.text}</p>{i === active && <Volume2 size={18} />}
+            <span>{String(i + 1).padStart(2, '0')}</span><p>{line.text}{line.translation && <small>{line.translation}</small>}</p>{i === active && <Volume2 size={18} />}
           </button>)}
         </div>
       </div>
@@ -341,8 +355,8 @@ function LearnMode({ course }) {
   const [flipped, setFlipped] = useState(false)
   const [hintStep, setHintStep] = useState(0)
   const words = useMemo(() => {
-    const list = onlyStarred ? course.words.filter(w => favorites.includes(w.id)) : [...course.words]
-    return shuffle ? [...list].sort((a, b) => a.id.localeCompare(b.id, 'en', { numeric: true }) * (Math.random() > .5 ? 1 : -1)) : list
+    const list = onlyStarred ? course.words.filter(w => favorites.includes(wordKey(w))) : [...course.words]
+    return shuffle ? [...list].sort((a, b) => wordKey(a).localeCompare(wordKey(b), 'en', { numeric: true }) * (Math.random() > .5 ? 1 : -1)) : list
   }, [course.words, favorites, onlyStarred, shuffle])
   useEffect(() => { setIndex(0); setFlipped(false); setHintStep(0) }, [onlyStarred, shuffle])
   const word = words[index]
@@ -362,7 +376,7 @@ function LearnMode({ course }) {
     if (!englishIsVisible) return
     const timer = setTimeout(() => speak(word.en), 180)
     return () => clearTimeout(timer)
-  }, [word?.id, flipped, showHints, frontLanguage, autoPronounce])
+  }, [word ? wordKey(word) : '', flipped, showHints, frontLanguage, autoPronounce])
 
   return <section className="learn-mode">
     <div className="learn-top">
@@ -382,7 +396,7 @@ function LearnMode({ course }) {
         <button className="nav-card prev" onClick={prev}><ChevronLeft /></button>
         <div className={`flashcard ${flipped ? 'flipped' : ''}`} onClick={reveal} role="button" tabIndex="0">
           <div className="card-face card-front">
-            <div className="card-label"><span>{showHints || frontLanguage === 'en' ? '英文' : '中文'}</span><button onClick={e => { e.stopPropagation(); toggleFavorite(word.id) }} aria-label="加星號"><Star fill={favorites.includes(word.id) ? 'currentColor' : 'none'} /></button></div>
+            <div className="card-label"><span>{showHints || frontLanguage === 'en' ? '英文' : '中文'}</span><button onClick={e => { e.stopPropagation(); toggleFavorite(wordKey(word)) }} aria-label="加星號"><Star fill={favorites.includes(wordKey(word)) ? 'currentColor' : 'none'} /></button></div>
             <div className="word-main">
               {showHints || frontLanguage === 'en' ? <><small>{word.part}</small><h2>{word.en}</h2><button className="speak" onClick={e => { e.stopPropagation(); speak(word.en) }}><Volume2 /> 聽發音</button></> : <><small>{word.part}</small><h2>{word.zh}</h2></>}
             </div>
@@ -391,7 +405,7 @@ function LearnMode({ course }) {
           </div>
           <div className="card-face card-back">
             <div className="card-label"><span>{showHints || frontLanguage === 'en' ? '中文答案' : '英文答案'}</span><Check /></div>
-            <div className="word-main"><small>{word.part}</small><h2>{showHints || frontLanguage === 'en' ? word.zh : word.en}</h2>{!showHints && frontLanguage === 'zh' && <button className="speak" onClick={e => { e.stopPropagation(); speak(word.en) }}><Volume2 /> 聽發音</button>}<p className="example">“{word.example}”</p></div>
+            <div className="word-main"><small>{word.part}</small><h2>{showHints || frontLanguage === 'en' ? word.zh : word.en}</h2>{!showHints && frontLanguage === 'zh' && <button className="speak" onClick={e => { e.stopPropagation(); speak(word.en) }}><Volume2 /> 聽發音</button>}<p className="example">“{word.example}”{word.exampleZh && <span>{word.exampleZh}</span>}</p></div>
             <div className="flip-hint"><RotateCcw size={16} /> 點一下回到正面</div>
           </div>
         </div>
@@ -490,7 +504,7 @@ function CompeteMode({ course }) {
           {!questionsComplete ? <div key={questionKey} className={`challenge-card ${dealing ? 'waiting' : ''}`}>
             <div className={`challenge-card-inner ${answer ? 'flipped' : ''}`}>
               <div className="challenge-face challenge-front"><span>{side === 'en' ? 'ENGLISH' : '中文'}</span><h2>{side === 'en' ? word.en : word.zh}</h2>{side === 'en' && <button className="round-speak" onClick={() => { const u = new SpeechSynthesisUtterance(word.en); u.lang = 'en-US'; speechSynthesis.speak(u) }}><Volume2 /></button>}</div>
-              <div className="challenge-face challenge-back"><span><Sparkles size={15} /> 正確答案</span><h2>{side === 'en' ? word.zh : word.en}</h2><p>{word.part} · {word.example}</p></div>
+              <div className="challenge-face challenge-back"><span><Sparkles size={15} /> 正確答案</span><h2>{side === 'en' ? word.zh : word.en}</h2><p>{word.part} · {word.example}{word.exampleZh && <small>{word.exampleZh}</small>}</p></div>
             </div>
           </div> : <div className="questions-complete-card"><span><Check /></span><small>ALL DONE</small><h2>題目作答完畢！</h2><p>{deck.length} 張字卡已全部完成，可以選擇其他遊戲或結算成績。</p><button onClick={() => setSelectedGame('menu')}><ListMusic /> 選擇其他遊戲</button></div>}
           {!questionsComplete && <div className="challenge-actions"><button disabled={dealing} className="answer-button" onClick={() => setAnswer(v => !v)}>{answer ? <RotateCcw /> : <CircleHelp />}{answer ? '隱藏答案' : '顯示答案'}</button><button disabled={dealing} className="next-button" onClick={nextWord}>{isLastCard ? '完成作答' : '下一題'} <ChevronRight /></button></div>}
@@ -671,7 +685,7 @@ function MatchCardsGame({ words, onScore, onBack }) {
     if (nextOpened.length < 2) return
     setLocked(true)
     const [first, second] = nextOpened.map(i => cards[i])
-    if (first.word.id === second.word.id) {
+    if (wordKey(first.word) === wordKey(second.word)) {
       schedule(() => setPrompt({ indices: nextOpened, word: first.word, answerShown: false }), 650)
     } else {
       schedule(() => { setOpened([]); setCurrentTeam(team => team === 0 ? 1 : 0); setLocked(false) }, 1050)
@@ -780,7 +794,7 @@ function DealSequence({ words }) {
         '--delay': `${slot * .09}s`, '--start-x': `${(slot - 3.5) * 95}px`,
         '--start-r': `${(slot - 3.5) * 18}deg`, '--angle': `${(slot - 3.5) * 2.2}deg`,
         zIndex: i + 1,
-      }} key={word.id}><Music2 /><span>{word.en}</span></div>
+      }} key={`${wordKey(word)}-${i}`}><Music2 /><span>{word.en}</span></div>
     })}
   </div>
 }
@@ -894,8 +908,6 @@ function AdminLogin() {
 
 function CreateCourseForm({ onCreated }) {
   const [title, setTitle] = useState('')
-  const [artist, setArtist] = useState('')
-  const [level, setLevel] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const create = async e => {
     e.preventDefault()
@@ -903,35 +915,35 @@ function CreateCourseForm({ onCreated }) {
     setSubmitting(true)
     const ref = await addDoc(collection(db, 'courses'), {
       title: title.trim(),
-      artist: artist.trim(),
-      level: level.trim(),
+      artist: '',
+      level: '',
       status: 'draft',
-      duration: '',
-      youtubeId: '',
+      youtubeUrl: '',
       srtText: '',
-      color: '#6d74d8',
+      translations: [],
       words: [],
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     })
-    setTitle(''); setArtist(''); setLevel(''); setSubmitting(false); onCreated(ref.id)
+    setTitle(''); setSubmitting(false); onCreated(ref.id)
   }
   return <form className="create-course" onSubmit={create}>
     <h2>新增課程</h2>
     <label>Title <b>必填</b><input value={title} onChange={e => setTitle(e.target.value)} placeholder="Twinkle Twinkle Little Star" required /></label>
-    <label>Artist <span>選填</span><input value={artist} onChange={e => setArtist(e.target.value)} placeholder="Super Simple Songs" /></label>
-    <label>Level <span>選填</span><input value={level} onChange={e => setLevel(e.target.value)} placeholder="初級" /></label>
     <button disabled={submitting}><Plus size={17} /> {submitting ? '新增中…' : '建立草稿'}</button>
   </form>
 }
 
 function CourseEditor({ course }) {
   const [form, setForm] = useState(course)
+  const [editorMode, setEditorMode] = useState('form')
+  const [jsonDraft, setJsonDraft] = useState(() => createJsonDraft(course))
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState('')
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [expandedWords, setExpandedWords] = useState([])
 
-  useEffect(() => { setForm(course); setMessage('') }, [course])
+  useEffect(() => { setForm(course); setJsonDraft(createJsonDraft(course)); setEditorMode('form'); setMessage(''); setExpandedWords([]) }, [course])
 
   const updateField = (field, value) => setForm(current => ({ ...current, [field]: value }))
   const updateWord = (index, field, value) => setForm(current => ({
@@ -942,33 +954,42 @@ function CourseEditor({ course }) {
     ...current,
     words: current.words.map((word, i) => i === wordIndex ? { ...word, hint: normalizeHints(word.hint).map((hint, h) => h === hintIndex ? value : hint) } : word),
   }))
-  const addWord = () => setForm(current => ({ ...current, words: [...current.words, { id: `word-${Date.now()}`, en: '', zh: '', part: '', example: '', hint: ['', '', ''] }] }))
-  const removeWord = index => setForm(current => ({ ...current, words: current.words.filter((_, i) => i !== index) }))
+  const addWord = () => setForm(current => ({ ...current, words: [...current.words, { en: '', zh: '', part: '', example: '', exampleZh: '', hint: ['', '', ''] }] }))
+  const removeWord = index => {
+    setForm(current => ({ ...current, words: current.words.filter((_, i) => i !== index) }))
+    setExpandedWords(current => current.filter(i => i !== index).map(i => i > index ? i - 1 : i))
+  }
+  const toggleWord = index => setExpandedWords(current => current.includes(index) ? current.filter(i => i !== index) : [...current, index])
   const save = async e => {
     e.preventDefault()
-    if (!form.title.trim()) return setMessage('Title 是必填。')
+    const source = editorMode === 'json' ? parseJsonDraft(jsonDraft) : form
+    if (source.error) return setMessage(source.error)
+    const cleaned = cleanCourseForm(source)
+    const validationError = validateCourseForSave(cleaned)
+    if (validationError) return setMessage(validationError)
     setSaving(true); setMessage('')
-    const words = form.words.map((word, index) => ({
-      id: slugify(word.id || word.en || `word-${index}`),
-      en: word.en.trim(),
-      zh: word.zh.trim(),
-      part: word.part.trim(),
-      example: word.example.trim(),
-      hint: normalizeHints(word.hint).map(hint => hint.trim()),
-    })).filter(word => word.en || word.zh)
+    const words = cleaned.words.map(word => ({
+      en: word.en,
+      zh: word.zh,
+      part: word.part,
+      example: word.example,
+      exampleZh: word.exampleZh,
+      hint: normalizeHints(word.hint),
+    })).filter(word => word.en || word.zh || word.part || word.example || word.exampleZh || word.hint.some(Boolean))
     await updateDoc(doc(db, 'courses', course.id), {
-      title: form.title.trim(),
-      artist: form.artist.trim(),
-      level: form.level.trim(),
-      duration: form.duration.trim(),
-      youtubeId: extractYoutubeId(form.youtubeId),
-      color: form.color || '#6d74d8',
-      status: form.status,
-      srtText: form.srtText,
+      title: cleaned.title,
+      artist: cleaned.artist,
+      level: cleaned.level,
+      youtubeUrl: cleaned.youtubeUrl,
+      youtubeId: '',
+      status: cleaned.status,
+      srtText: cleaned.srtText,
+      translations: cleaned.translations,
       words,
       updatedAt: serverTimestamp(),
     })
-    setSaving(false); setMessage('已儲存。')
+    setForm(cleaned); setJsonDraft(createJsonDraft(cleaned))
+    setSaving(false); setMessage(getTranslationWarning(cleaned) || '已儲存。')
   }
   const deleteCourse = async () => {
     await deleteDoc(doc(db, 'courses', course.id))
@@ -980,44 +1001,153 @@ function CourseEditor({ course }) {
       <div><small>{form.status === 'published' ? 'PUBLISHED' : 'DRAFT'}</small><h2>{form.title || '未命名課程'}</h2></div>
       <div><button type="button" className="danger-outline" onClick={() => setConfirmDelete(true)}><Trash2 size={17} /> 刪除</button><button disabled={saving}><Save size={17} /> {saving ? '儲存中…' : '儲存課程'}</button></div>
     </div>
-    {message && <div className="save-message">{message}</div>}
-    <div className="editor-grid">
-      <label>Title<input value={form.title} onChange={e => updateField('title', e.target.value)} required /></label>
-      <label>Artist<input value={form.artist} onChange={e => updateField('artist', e.target.value)} /></label>
-      <label>Level<input value={form.level} onChange={e => updateField('level', e.target.value)} placeholder="初級 / 中級 / 高級" /></label>
-      <label>Duration<input value={form.duration} onChange={e => updateField('duration', e.target.value)} placeholder="2:34" /></label>
-      <label>YouTube 連結或 ID<input value={form.youtubeId} onChange={e => updateField('youtubeId', e.target.value)} placeholder="https://www.youtube.com/watch?v=..." /></label>
-      <label>狀態<select value={form.status} onChange={e => updateField('status', e.target.value)}><option value="draft">草稿</option><option value="published">發布</option></select></label>
-      <label>主色<input type="color" value={form.color || '#6d74d8'} onChange={e => updateField('color', e.target.value)} /></label>
+    {message && <div className={`save-message ${message === '已儲存。' ? '' : message.startsWith('提醒：') ? 'warning' : 'error'}`}>{message}</div>}
+    <div className="editor-mode-tabs">
+      <button type="button" className={editorMode === 'form' ? 'active' : ''} onClick={() => { setEditorMode('form'); setMessage('') }}>表單編輯</button>
+      <button type="button" className={editorMode === 'json' ? 'active' : ''} onClick={() => { setJsonDraft(createJsonDraft(form)); setEditorMode('json'); setMessage('') }}>JSON 編輯</button>
     </div>
-    <label className="srt-editor">SRT 同步歌詞<textarea value={form.srtText} onChange={e => updateField('srtText', e.target.value)} placeholder={'1\\n00:00:19,700 --> 00:00:25,000\\nTwinkle twinkle little star'} /></label>
-    <section className="words-editor">
-      <div className="words-editor-heading"><h3>課程單字</h3><button type="button" onClick={addWord}><Plus size={17} /> 新增單字</button></div>
-      {form.words.length ? form.words.map((word, index) => <div className="word-editor" key={`${word.id}-${index}`}>
-        <div className="word-editor-title"><strong>單字 {index + 1}</strong><button type="button" onClick={() => removeWord(index)}><Trash2 size={16} /> 移除</button></div>
-        <div className="word-grid">
-          <label>英文<input value={word.en} onChange={e => updateWord(index, 'en', e.target.value)} /></label>
-          <label>中文<input value={word.zh} onChange={e => updateWord(index, 'zh', e.target.value)} /></label>
-          <label>詞性<input value={word.part} onChange={e => updateWord(index, 'part', e.target.value)} placeholder="noun / verb" /></label>
-          <label>例句<input value={word.example} onChange={e => updateWord(index, 'example', e.target.value)} /></label>
+    {editorMode === 'form' ? <>
+      <div className="editor-grid">
+        <label>Title <b>必填</b><input value={form.title} onChange={e => updateField('title', e.target.value)} required /></label>
+        <label>Artist <span>選填</span><input value={form.artist} onChange={e => updateField('artist', e.target.value)} /></label>
+        <label>Level <b>發布必選</b><select value={form.level} onChange={e => updateField('level', e.target.value)}><option value="">未設定</option>{LEVEL_OPTIONS.map(level => <option key={level} value={level}>{level}</option>)}</select></label>
+        <label>YouTube 連結 <b>發布必填</b><input value={form.youtubeUrl} onChange={e => updateField('youtubeUrl', e.target.value)} placeholder="https://www.youtube.com/watch?v=..." /></label>
+        <label>狀態<select value={form.status} onChange={e => updateField('status', e.target.value)}><option value="draft">草稿</option><option value="published">發布</option></select></label>
+      </div>
+      <label className="srt-editor">SRT 同步歌詞 <b>發布必填</b><textarea value={form.srtText} onChange={e => updateField('srtText', e.target.value)} placeholder={'1\\n00:00:19,700 --> 00:00:25,000\\nTwinkle twinkle little star'} /></label>
+      <label className="translation-editor">中文翻譯 <span>選填，一行對應一句歌詞</span><textarea value={normalizeTranslations(form.translations).join('\n')} onChange={e => updateField('translations', e.target.value.split('\n'))} placeholder={'一閃一閃小星星\n我多麼想知道你是什麼'} /></label>
+      <section className="words-editor">
+        <div className="words-editor-heading"><h3>課程單字</h3><button type="button" onClick={addWord}><Plus size={17} /> 新增單字</button></div>
+        {form.words.length ? form.words.map((word, index) => {
+          const expanded = expandedWords.includes(index)
+          return <div className={`word-editor ${expanded ? 'expanded' : 'collapsed'}`} key={`${wordKey(word)}-${index}`}>
+          <div className="word-editor-title" role="button" tabIndex="0" aria-expanded={expanded} onClick={() => toggleWord(index)} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleWord(index) } }}>
+            <div><strong>單字 {index + 1}</strong><span><b>{word.en || '未填英文'}</b><em>{word.zh || '未填中文'}</em></span></div>
+            <div><button type="button" onClick={e => { e.stopPropagation(); removeWord(index) }}><Trash2 size={16} /> 移除</button></div>
+          </div>
+          {expanded && <>
+            <div className="word-grid">
+              <label>英文 <b>發布必填</b><input value={word.en} onChange={e => updateWord(index, 'en', e.target.value)} /></label>
+              <label>中文 <b>發布必填</b><input value={word.zh} onChange={e => updateWord(index, 'zh', e.target.value)} /></label>
+              <label>詞性 <b>發布必選</b><select value={word.part} onChange={e => updateWord(index, 'part', e.target.value)}><option value="">請選擇詞性</option>{PART_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+              <label>英文例句<input value={word.example} onChange={e => updateWord(index, 'example', e.target.value)} /></label>
+              <label>中文例句翻譯 <b>發布必填</b><input value={word.exampleZh || ''} onChange={e => updateWord(index, 'exampleZh', e.target.value)} /></label>
+            </div>
+            <div className="hint-grid">{normalizeHints(word.hint).map((hint, hintIndex) => <label key={hintIndex}>提示 {hintIndex + 1} <span>選填</span><input value={hint} onChange={e => updateHint(index, hintIndex, e.target.value)} placeholder={hintIndex === 0 ? '✨' : '中文提示'} /></label>)}</div>
+          </>}
         </div>
-        <div className="hint-grid">{normalizeHints(word.hint).map((hint, hintIndex) => <label key={hintIndex}>提示 {hintIndex + 1}<input value={hint} onChange={e => updateHint(index, hintIndex, e.target.value)} placeholder={hintIndex === 0 ? '✨' : '中文提示'} /></label>)}</div>
-      </div>) : <div className="admin-empty small"><BookOpen /><h2>還沒有單字</h2><p>按「新增單字」開始建立字卡。</p></div>}
-    </section>
+        }) : <div className="admin-empty small"><BookOpen /><h2>還沒有單字</h2><p>按「新增單字」開始建立字卡。</p></div>}
+      </section>
+    </> : <JsonCourseEditor value={jsonDraft} onChange={setJsonDraft} />}
     {confirmDelete && <Modal title="確定刪除這首課程？" text="這會刪除 Firestore 中的課程資料、SRT 與所有單字。此動作無法復原。" onCancel={() => setConfirmDelete(false)} onConfirm={deleteCourse} />}
   </form>
 }
 
-function normalizeHints(hints) {
-  const list = Array.isArray(hints) ? hints : []
-  return [list[0] || '', list[1] || '', list[2] || '']
+function JsonCourseEditor({ value, onChange }) {
+  const update = (field, next) => onChange(current => ({ ...current, [field]: next }))
+  return <section className="json-editor">
+    <div className="json-editor-note"><CircleHelp size={18} /><span>這三份 JSON 會合併儲存到同一個 Firestore 課程文件。課程 ID 由 Firebase 管理，不需要放在 JSON 裡。</span></div>
+    <label>course.json<textarea value={value.course} onChange={e => update('course', e.target.value)} spellCheck="false" /></label>
+    <label>srt.json<textarea value={value.srt} onChange={e => update('srt', e.target.value)} spellCheck="false" /></label>
+    <label>words.json<textarea value={value.words} onChange={e => update('words', e.target.value)} spellCheck="false" /></label>
+  </section>
 }
 
-function slugify(value) {
-  const text = String(value || '').toLowerCase().trim()
-    .replace(/[^a-z0-9\u4e00-\u9fa5]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-  return text || `item-${Date.now()}`
+function normalizeHints(hints) {
+  const list = Array.isArray(hints) ? hints : []
+  return [list[0] || '', list[1] || '', list[2] || ''].map(hint => String(hint).trim())
+}
+
+function normalizeTranslations(translations) {
+  return Array.isArray(translations) ? translations.map(line => String(line || '').trim()) : []
+}
+
+function wordKey(word) {
+  return `${word?.en || ''}::${word?.zh || ''}::${word?.part || ''}`.toLowerCase()
+}
+
+function createJsonDraft(course) {
+  const cleaned = cleanCourseForm(course)
+  return {
+    course: stringifyJson({
+      title: cleaned.title,
+      artist: cleaned.artist,
+      level: cleaned.level,
+      youtubeUrl: cleaned.youtubeUrl,
+      status: cleaned.status,
+    }),
+    srt: stringifyJson({ srtText: cleaned.srtText, translations: cleaned.translations }),
+    words: stringifyJson({ words: cleaned.words }),
+  }
+}
+
+function parseJsonDraft(draft) {
+  try {
+    const course = JSON.parse(draft.course)
+    const srt = JSON.parse(draft.srt)
+    const words = JSON.parse(draft.words)
+    if (!course || typeof course !== 'object' || Array.isArray(course)) throw new Error('course.json 必須是一個 JSON object。')
+    if (!srt || typeof srt !== 'object' || Array.isArray(srt)) throw new Error('srt.json 必須是一個 JSON object。')
+    if (!words || typeof words !== 'object' || Array.isArray(words)) throw new Error('words.json 必須是一個 JSON object。')
+    if (!Array.isArray(words.words)) throw new Error('words.json 需要包含 words 陣列。')
+    return {
+      title: course.title || '',
+      artist: course.artist || '',
+      level: course.level || '',
+      youtubeUrl: course.youtubeUrl || youtubeUrlFromId(course.youtubeId || ''),
+      status: course.status || 'draft',
+      srtText: srt.srtText || '',
+      translations: normalizeTranslations(srt.translations),
+      words: words.words,
+    }
+  } catch (error) {
+    return { error: `JSON 格式錯誤：${error.message}` }
+  }
+}
+
+function stringifyJson(value) {
+  return JSON.stringify(value, null, 2)
+}
+
+function cleanCourseForm(form) {
+  return {
+    title: String(form.title || '').trim(),
+    artist: String(form.artist || '').trim(),
+    level: LEVEL_OPTIONS.includes(form.level) ? form.level : '',
+    youtubeUrl: normalizeYoutubeUrl(form.youtubeUrl || form.youtubeId || ''),
+    status: form.status === 'published' ? 'published' : 'draft',
+    srtText: String(form.srtText || '').trim(),
+    translations: normalizeTranslations(form.translations),
+    words: Array.isArray(form.words) ? form.words.map(word => ({
+      en: String(word.en || '').trim(),
+      zh: String(word.zh || '').trim(),
+      part: PART_OPTIONS.some(([value]) => value === word.part) ? word.part : '',
+      example: String(word.example || '').trim(),
+      exampleZh: String(word.exampleZh || '').trim(),
+      hint: normalizeHints(word.hint),
+    })) : [],
+  }
+}
+
+function validateCourseForSave(course) {
+  if (!course.title) return 'Title 是必填。'
+  if (course.status !== 'published') return ''
+  if (!course.level) return '要發布課程，請先選擇 Level。'
+  if (!extractYoutubeId(course.youtubeUrl)) return '要發布課程，請先填入有效的 YouTube 連結。'
+  if (!course.srtText) return '要發布課程，請先填入 SRT 同步歌詞。'
+  const nonEmptyWords = course.words.filter(word => word.en || word.zh || word.part || word.example || word.exampleZh || word.hint.some(Boolean))
+  if (!nonEmptyWords.length) return '要發布課程，至少需要新增一個課程單字。'
+  const incompleteIndex = nonEmptyWords.findIndex(word => !word.en || !word.zh || !word.part || !word.exampleZh)
+  if (incompleteIndex >= 0) return `要發布課程，單字 ${incompleteIndex + 1} 的英文、中文、詞性、中文例句翻譯都必須填完。`
+  return ''
+}
+
+function getTranslationWarning(course) {
+  const translationCount = normalizeTranslations(course.translations).filter(Boolean).length
+  if (!translationCount) return ''
+  const lyricCount = parseSrt(course.srtText || '').length
+  if (translationCount !== lyricCount) return `提醒：目前有 ${lyricCount} 句 SRT 歌詞，但有 ${translationCount} 句中文翻譯。已儲存，但建議確認是否一行對應一句。`
+  return ''
 }
 
 function extractYoutubeId(value) {
@@ -1025,6 +1155,17 @@ function extractYoutubeId(value) {
   if (!input) return ''
   const match = input.match(/(?:v=|youtu\.be\/|embed\/|shorts\/)([A-Za-z0-9_-]{11})/) || input.match(/^[A-Za-z0-9_-]{11}$/)
   return match ? (match[1] || match[0]) : input
+}
+
+function normalizeYoutubeUrl(value) {
+  const input = String(value || '').trim()
+  const id = extractYoutubeId(input)
+  if (!id) return ''
+  return input.startsWith('http') ? input : youtubeUrlFromId(id)
+}
+
+function youtubeUrlFromId(id) {
+  return id ? `https://www.youtube.com/watch?v=${id}` : ''
 }
 
 export default App
