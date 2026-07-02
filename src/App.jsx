@@ -5,7 +5,7 @@ import {
 } from 'firebase/firestore'
 import {
   ArrowLeft, BookOpen, Check, ChevronLeft, ChevronRight, CircleHelp,
-  Flame, Headphones, ListMusic, LogOut, Medal, Music2, Pause,
+  Flame, GripVertical, Headphones, ListMusic, LogOut, Medal, Music2, Pause,
   Play, Plus, RotateCcw, Save, Search, Shuffle, Sparkles, Star, Trash2, Trophy, Volume2, X,
 } from 'lucide-react'
 import { auth, db, firebaseReady } from './firebase'
@@ -937,6 +937,8 @@ function AdminDashboard() {
   const [authLoading, setAuthLoading] = useState(true)
   const { courses, loading, error } = useCourses({ includeDrafts: true, enabled: !!user })
   const [selectedId, setSelectedId] = useState(null)
+  const [draggedCourseId, setDraggedCourseId] = useState(null)
+  const [courseDropIndicator, setCourseDropIndicator] = useState(null)
   const selectedCourse = courses.find(course => course.id === selectedId) || courses[0] || null
 
   useEffect(() => {
@@ -948,6 +950,22 @@ function AdminDashboard() {
     if (!selectedId && courses.length) setSelectedId(courses[0].id)
     if (selectedId && courses.length && !courses.some(course => course.id === selectedId)) setSelectedId(courses[0]?.id || null)
   }, [courses, selectedId])
+
+  const dropCourse = async () => {
+    const sourceIndex = courses.findIndex(course => course.id === draggedCourseId)
+    const targetIndex = courseDropIndicator
+    setDraggedCourseId(null)
+    setCourseDropIndicator(null)
+    if (sourceIndex < 0 || targetIndex === null || targetIndex < 0 || sourceIndex === targetIndex || sourceIndex + 1 === targetIndex) return
+    const next = [...courses]
+    const [moved] = next.splice(sourceIndex, 1)
+    next.splice(sourceIndex < targetIndex ? targetIndex - 1 : targetIndex, 0, moved)
+    await Promise.all(next.map((course, order) => updateDoc(doc(db, 'courses', course.id), {
+      order: order + 1,
+      updatedAt: serverTimestamp(),
+    })))
+    setSelectedId(moved.id)
+  }
 
   if (!firebaseReady) return <SetupState title="尚未設定 Firebase" text="請建立 .env.local，填入 Firebase Web App 的 VITE_FIREBASE_* 設定，然後重新啟動 dev server 或重新部署。" />
   if (authLoading) return <div className="loading"><span className="logo-mark"><Music2 /></span><p>正在確認後台登入狀態…</p></div>
@@ -965,9 +983,11 @@ function AdminDashboard() {
         <CreateCourseForm onCreated={setSelectedId} />
         <div className="admin-course-list">
           <h2>所有課程</h2>
-          {loading ? <p>讀取中…</p> : courses.length ? courses.map(course => <button key={course.id} className={selectedCourse?.id === course.id ? 'active' : ''} onClick={() => setSelectedId(course.id)}>
-            <span className={`status-dot ${course.status}`} /> <div><strong>{course.title}</strong><small>{course.artist || '未填 Artist'} · {course.words.length} 字</small></div>
-          </button>) : <p>目前沒有課程。先用上方表單新增第一首歌。</p>}
+          {loading ? <p>讀取中…</p> : courses.length ? courses.map((course, index) => <div key={course.id} draggable onDragStart={e => { setDraggedCourseId(course.id); e.dataTransfer.effectAllowed = 'move' }} onDragOver={e => { e.preventDefault(); setCourseDropIndicator(getDropIndex(e, index)) }} onDrop={dropCourse} onDragEnd={() => { setDraggedCourseId(null); setCourseDropIndicator(null) }} className={`admin-course-item ${selectedCourse?.id === course.id ? 'active' : ''} ${draggedCourseId === course.id ? 'dragging' : ''} ${courseDropIndicator === index ? 'drop-before' : ''} ${courseDropIndicator === index + 1 ? 'drop-after' : ''}`}>
+            <button type="button" className="course-select-button" onClick={() => setSelectedId(course.id)}>
+              <span className="drag-handle"><GripVertical size={18} /></span><span className={`status-dot ${course.status}`} /> <div><strong>{course.title}</strong><small>{course.artist || '未填 Artist'} · {course.words.length} 字</small></div>
+            </button>
+          </div>) : <p>目前沒有課程。先用上方表單新增第一首歌。</p>}
         </div>
       </aside>
       <section className="admin-editor-shell">
@@ -1024,6 +1044,7 @@ function CreateCourseForm({ onCreated }) {
       srtText: '',
       translations: [],
       words: [],
+      order: Date.now(),
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     })
@@ -1044,8 +1065,10 @@ function CourseEditor({ course }) {
   const [message, setMessage] = useState('')
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [expandedWords, setExpandedWords] = useState([])
+  const [draggedWordIndex, setDraggedWordIndex] = useState(null)
+  const [wordDropIndicator, setWordDropIndicator] = useState(null)
 
-  useEffect(() => { setForm(course); setJsonDraft(createJsonDraft(course)); setEditorMode('form'); setMessage(''); setExpandedWords([]) }, [course])
+  useEffect(() => { setForm(course); setJsonDraft(createJsonDraft(course)); setEditorMode('form'); setMessage(''); setExpandedWords([]); setDraggedWordIndex(null); setWordDropIndicator(null) }, [course])
 
   const updateField = (field, value) => setForm(current => ({ ...current, [field]: value }))
   const updateWord = (index, field, value) => setForm(current => ({
@@ -1060,6 +1083,26 @@ function CourseEditor({ course }) {
   const removeWord = index => {
     setForm(current => ({ ...current, words: current.words.filter((_, i) => i !== index) }))
     setExpandedWords(current => current.filter(i => i !== index).map(i => i > index ? i - 1 : i))
+  }
+  const dropWord = () => {
+    const source = draggedWordIndex
+    const target = wordDropIndicator
+    setDraggedWordIndex(null)
+    setWordDropIndicator(null)
+    if (source === null || target === null || source === target || source < 0 || target < 0 || source + 1 === target) return
+    setForm(current => {
+      const words = [...current.words]
+      const [moved] = words.splice(source, 1)
+      words.splice(source < target ? target - 1 : target, 0, moved)
+      return { ...current, words }
+    })
+    setExpandedWords(current => current.map(i => {
+      const nextTarget = source < target ? target - 1 : target
+      if (i === source) return nextTarget
+      if (source < target && i > source && i <= target) return i - 1
+      if (source > target && i >= target && i < source) return i + 1
+      return i
+    }))
   }
   const toggleWord = index => setExpandedWords(current => current.includes(index) ? current.filter(i => i !== index) : [...current, index])
   const save = async e => {
@@ -1122,10 +1165,12 @@ function CourseEditor({ course }) {
         <div className="words-editor-heading"><h3>課程單字</h3><button type="button" onClick={addWord}><Plus size={17} /> 新增單字</button></div>
         {form.words.length ? form.words.map((word, index) => {
           const expanded = expandedWords.includes(index)
-          return <div className={`word-editor ${expanded ? 'expanded' : 'collapsed'}`} key={`${wordKey(word)}-${index}`}>
-          <div className="word-editor-title" role="button" tabIndex="0" aria-expanded={expanded} onClick={() => toggleWord(index)} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleWord(index) } }}>
-            <div><strong>單字 {index + 1}</strong><span><b>{word.en || '未填英文'}</b><em>{word.zh || '未填中文'}</em></span></div>
-            <div><button type="button" onClick={e => { e.stopPropagation(); removeWord(index) }}><Trash2 size={16} /> 移除</button></div>
+          return <div onDragOver={e => { e.preventDefault(); setWordDropIndicator(getDropIndex(e, index)) }} onDrop={dropWord} className={`word-editor ${expanded ? 'expanded' : 'collapsed'} ${draggedWordIndex === index ? 'dragging' : ''} ${wordDropIndicator === index ? 'drop-before' : ''} ${wordDropIndicator === index + 1 ? 'drop-after' : ''}`} key={`${wordKey(word)}-${index}`}>
+          <div draggable onDragStart={e => { setDraggedWordIndex(index); e.dataTransfer.effectAllowed = 'move' }} onDragEnd={() => { setDraggedWordIndex(null); setWordDropIndicator(null) }} className="word-editor-title" role="button" tabIndex="0" aria-expanded={expanded} onClick={() => toggleWord(index)} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleWord(index) } }}>
+            <div><span className="drag-handle"><GripVertical size={18} /></span><strong>單字 {index + 1}</strong><span><b>{word.en || '未填英文'}</b><em>{word.zh || '未填中文'}</em></span></div>
+            <div>
+              <button type="button" onClick={e => { e.stopPropagation(); removeWord(index) }}><Trash2 size={16} /> 移除</button>
+            </div>
           </div>
           {expanded && <>
             <div className="word-grid">
@@ -1162,6 +1207,11 @@ function normalizeHints(hints) {
 
 function normalizeTranslations(translations) {
   return Array.isArray(translations) ? translations.map(line => String(line || '').trim()) : []
+}
+
+function getDropIndex(event, index) {
+  const rect = event.currentTarget.getBoundingClientRect()
+  return event.clientY < rect.top + rect.height / 2 ? index : index + 1
 }
 
 function wordKey(word) {
