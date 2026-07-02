@@ -1,9 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'firebase/auth'
+import {
+  addDoc, collection, deleteDoc, doc, onSnapshot, query, serverTimestamp, updateDoc, where,
+} from 'firebase/firestore'
 import {
   ArrowLeft, BookOpen, Check, ChevronLeft, ChevronRight, CircleHelp,
-  Clock3, Flame, Headphones, Heart, ListMusic, Medal, Music2, Pause,
-  Play, RotateCcw, Search, Shuffle, Sparkles, Star, Trophy, Volume2, X,
+  Clock3, Flame, Headphones, ListMusic, LogOut, Medal, Music2, Pause,
+  Play, Plus, RotateCcw, Save, Search, Shuffle, Sparkles, Star, Trash2, Trophy, Volume2, X,
 } from 'lucide-react'
+import { auth, db, firebaseReady } from './firebase'
 
 const MODES = [
   { id: 'listen', label: '聆聽', icon: Headphones },
@@ -13,8 +18,9 @@ const MODES = [
 
 function useHashRoute() {
   const read = () => {
-    const [, courseId, mode] = location.hash.split('/')
-    return { courseId: courseId || null, mode: mode || 'listen' }
+    const [, first, second] = location.hash.split('/')
+    if (first === 'admin') return { admin: true, courseId: null, mode: 'admin' }
+    return { admin: false, courseId: first || null, mode: second || 'listen' }
   }
   const [route, setRoute] = useState(read)
   useEffect(() => {
@@ -26,18 +32,74 @@ function useHashRoute() {
 }
 
 function App() {
-  const [courses, setCourses] = useState([])
-  const [loading, setLoading] = useState(true)
+  const { courses, loading, error } = useCourses()
   const route = useHashRoute()
 
-  useEffect(() => {
-    fetch('./data/courses.json').then(r => r.json()).then(setCourses).finally(() => setLoading(false))
-  }, [])
-
+  if (route.admin) return <AdminDashboard />
   const course = courses.find(c => c.id === route.courseId)
   if (loading) return <div className="loading"><span className="logo-mark"><Music2 /></span><p>正在準備音樂教室…</p></div>
+  if (error) return <SetupState title="Firebase 尚未連線" text={error} />
   if (course) return <Course course={course} mode={route.mode} />
   return <Home courses={courses} />
+}
+
+function useCourses({ includeDrafts = false, enabled = true } = {}) {
+  const [state, setState] = useState({ courses: [], loading: true, error: '' })
+  useEffect(() => {
+    if (!enabled) {
+      setState({ courses: [], loading: false, error: '' })
+      return
+    }
+    if (!firebaseReady) {
+      setState({ courses: [], loading: false, error: '請先建立 Firebase 專案，並在 .env.local 填入 VITE_FIREBASE_* 設定。' })
+      return
+    }
+    const source = includeDrafts ? collection(db, 'courses') : query(collection(db, 'courses'), where('status', '==', 'published'))
+    const unsubscribe = onSnapshot(source, snapshot => {
+      const courses = snapshot.docs.map(courseFromDoc)
+        .sort((a, b) => (a.order ?? 9999) - (b.order ?? 9999) || a.title.localeCompare(b.title))
+      setState({ courses, loading: false, error: '' })
+    }, error => {
+      setState({ courses: [], loading: false, error: `無法讀取 Firestore courses：${error.message}` })
+    })
+    return unsubscribe
+  }, [includeDrafts, enabled])
+  return state
+}
+
+function courseFromDoc(snapshot) {
+  const data = snapshot.data()
+  return {
+    id: snapshot.id,
+    title: data.title || '',
+    artist: data.artist || '',
+    level: data.level || '',
+    duration: data.duration || '',
+    youtubeId: data.youtubeId || '',
+    srtText: data.srtText || '',
+    color: data.color || '#6d74d8',
+    status: data.status || 'draft',
+    order: data.order ?? 9999,
+    words: Array.isArray(data.words) ? data.words.map(normalizeWord) : [],
+  }
+}
+
+function normalizeWord(word, index = 0) {
+  return {
+    id: word.id || slugify(word.en || `word-${index}`),
+    en: word.en || '',
+    zh: word.zh || '',
+    part: word.part || '',
+    example: word.example || '',
+    hint: Array.isArray(word.hint) ? word.hint : ['', '', ''],
+  }
+}
+
+function SetupState({ title, text }) {
+  return <div className="setup-state">
+    <Brand />
+    <div><Music2 /><h1>{title}</h1><p>{text}</p><a href="#/admin">前往課程後台</a></div>
+  </div>
 }
 
 function Brand({ compact = false }) {
@@ -47,16 +109,18 @@ function Brand({ compact = false }) {
   </a>
 }
 
+const youtubeThumbnail = youtubeId => `https://img.youtube.com/vi/${youtubeId}/hqdefault.jpg`
+
 function Home({ courses }) {
   const [search, setSearch] = useState('')
   const filtered = courses.filter(c => `${c.title} ${c.artist}`.toLowerCase().includes(search.toLowerCase()))
-  const totalWords = courses.reduce((n, c) => n + c.words.length, 0)
+  const totalWords = courses.reduce((n, c) => n + (c.words?.length || 0), 0)
 
   return <div className="home-page">
     <header className="home-nav container">
       <Brand />
       <nav><a href="#songs">探索歌曲</a><a href="#how">學習方式</a></nav>
-      <a className="pill-button small" href="#songs"><Play size={16} fill="currentColor" /> 開始學習</a>
+      <a className="pill-button small" href="#/admin"><Plus size={16} /> 課程後台</a>
     </header>
 
     <main>
@@ -101,7 +165,7 @@ function Home({ courses }) {
           <div className="song-grid">
             {filtered.map((course, i) => <SongCard key={course.id} course={course} index={i} />)}
           </div>
-          {!filtered.length && <div className="empty">找不到符合的歌曲，換個關鍵字試試看。</div>}
+          {!filtered.length && <div className="empty">{courses.length ? '找不到符合的歌曲，換個關鍵字試試看。' : '目前 Firebase 還沒有已發布課程，請先到課程後台新增並發布。'}</div>}
         </div>
       </section>
 
@@ -121,16 +185,16 @@ function Home({ courses }) {
 function SongCard({ course, index }) {
   return <a className="song-card" href={`#/${course.id}/listen`}>
     <div className="cover-wrap">
-      <img src={course.cover} alt={`${course.title} 封面`} />
-      <span className="level">{course.level}</span>
+      {course.youtubeId ? <img src={youtubeThumbnail(course.youtubeId)} alt={`${course.title} YouTube 縮圖`} /> : <div className="missing-thumbnail"><Music2 /><span>尚未設定 YouTube</span></div>}
+      {course.level && <span className="level">{course.level}</span>}
       <span className="card-play"><Play fill="currentColor" /></span>
       <span className="track-num">0{index + 1}</span>
     </div>
     <div className="song-meta">
       <div><h3>{course.title}</h3><p>{course.artist}</p></div>
-      <span><Clock3 size={14} /> {course.duration}</span>
+      {course.duration && <span><Clock3 size={14} /> {course.duration}</span>}
     </div>
-    <div className="card-foot"><span><BookOpen size={15} /> {course.words.length} 個單字</span><span>開始學習 <ArrowLeft className="go-arrow" size={16} /></span></div>
+    <div className="card-foot"><span><BookOpen size={15} /> {course.words?.length || 0} 個單字</span><span>開始學習 <ArrowLeft className="go-arrow" size={16} /></span></div>
   </a>
 }
 
@@ -139,7 +203,7 @@ function Course({ course, mode }) {
   return <div className="course-page">
     <header className="course-header">
       <Brand compact />
-      <div className="course-title"><img src={course.cover} /><div><small>正在學習</small><strong>{course.title}</strong></div></div>
+      <div className="course-title">{course.youtubeId ? <img src={youtubeThumbnail(course.youtubeId)} alt={`${course.title} YouTube 縮圖`} /> : <span className="mini-placeholder"><Music2 size={17} /></span>}<div><small>正在學習</small><strong>{course.title}</strong></div></div>
       <a href="#/" className="exit-link"><X size={18} /> 離開課程</a>
     </header>
     <nav className="mode-tabs">
@@ -170,6 +234,7 @@ function useYouTube(youtubeId) {
   const elementId = useMemo(() => `youtube-player-${youtubeId}`, [youtubeId])
 
   useEffect(() => {
+    if (!youtubeId) return
     let cancelled = false
     const makePlayer = () => {
       if (cancelled || playerRef.current || !window.YT?.Player) return
@@ -212,7 +277,7 @@ function ListenMode({ course }) {
   const lyricsViewportRef = useRef(null)
   const lyricRefs = useRef([])
   const { elementId, ready, playing, time, duration, seek, seekAndPlay, toggle } = useYouTube(course.youtubeId)
-  useEffect(() => { fetch(`./${course.srt}`).then(r => r.text()).then(t => setLyrics(parseSrt(t))) }, [course.srt])
+  useEffect(() => { setLyrics(course.srtText ? parseSrt(course.srtText) : []) }, [course.srtText])
   const active = lyrics.findIndex((line, i) => time >= line.start && time < (line.end || lyrics[i + 1]?.start))
 
   useEffect(() => {
@@ -225,6 +290,8 @@ function ListenMode({ course }) {
       behavior: 'smooth',
     })
   }, [active, playing])
+
+  if (!course.youtubeId) return <section className="empty-mode"><Music2 /><h2>這首課程還沒有 YouTube 影片</h2><p>請到課程後台填入 YouTube 連結或影片 ID。</p></section>
 
   return <section className="listen-layout">
     <div className="player-panel">
@@ -337,11 +404,12 @@ function LearnMode({ course }) {
 }
 
 function CompeteMode({ course }) {
+  const courseWords = course.words || []
   const [scores, setScores] = useState([0, 0])
   const [selectedGame, setSelectedGame] = useState('menu')
   const [lyricsDifficulty, setLyricsDifficulty] = useState('easy')
   const [side, setSide] = useState('en')
-  const [deck, setDeck] = useState(() => shuffleWords(course.words))
+  const [deck, setDeck] = useState(() => shuffleWords(courseWords))
   const [cardIndex, setCardIndex] = useState(0)
   const [answer, setAnswer] = useState(false)
   const [confirmReset, setConfirmReset] = useState(false)
@@ -359,6 +427,11 @@ function CompeteMode({ course }) {
     const timer = setTimeout(() => setCelebration(null), 1800)
     return () => clearTimeout(timer)
   }, [celebration])
+
+  useEffect(() => {
+    setDeck(shuffleWords(courseWords)); setCardIndex(0); setAnswer(false)
+    setQuestionsComplete(false); setSelectedGame('menu')
+  }, [course.id])
 
   useEffect(() => {
     if (settlementPhase !== 'drum') return
@@ -385,15 +458,17 @@ function CompeteMode({ course }) {
   }
   const startFlashGame = (language = 'en') => {
     setSide(language)
-    setDeck(shuffleWords(course.words)); setCardIndex(0); setAnswer(false)
+    setDeck(shuffleWords(courseWords)); setCardIndex(0); setAnswer(false)
     setQuestionsComplete(false); setQuestionKey(k => k + 1); setSelectedGame('flash'); setDealing(true)
     setTimeout(() => setDealing(false), window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 80 : 1900)
   }
   const restartGame = () => {
-    setScores([0, 0]); setDeck(shuffleWords(course.words)); setCardIndex(0)
+    setScores([0, 0]); setDeck(shuffleWords(courseWords)); setCardIndex(0)
     setAnswer(false); setQuestionsComplete(false); setGameEnded(false)
     setSettlementPhase(null); setQuestionKey(k => k + 1); setDealing(false); setSelectedGame('menu')
   }
+
+  if (!courseWords.length) return <section className="empty-mode"><Trophy /><h2>這首課程還沒有單字</h2><p>請先到課程後台新增單字，才能使用比賽模式。</p></section>
 
   return <section className="compete-mode">
     <div className="compete-heading">
@@ -406,7 +481,7 @@ function CompeteMode({ course }) {
     <div className="scoreboard">
       <TeamScore team="A" score={scores[0]} color="coral" disabled={gameEnded} celebrating={celebration?.team === 0} onAdd={() => add(0)} />
       <div className="challenge-center">
-        {gameEnded ? <CompetitionEnded onRestart={restartGame} /> : selectedGame === 'menu' ? <GameSelector onSelect={game => setSelectedGame(`intro-${game}`)} /> : selectedGame === 'intro-flash' ? <GameInstructions type="flash" onBack={() => setSelectedGame('menu')} onStart={startFlashGame} /> : selectedGame === 'intro-match' ? <GameInstructions type="match" onBack={() => setSelectedGame('menu')} onStart={() => setSelectedGame('match')} /> : selectedGame === 'intro-lyrics' ? <GameInstructions type="lyrics" onBack={() => setSelectedGame('menu')} onStart={difficulty => { setLyricsDifficulty(difficulty); setSelectedGame('lyrics') }} /> : selectedGame === 'match' ? <MatchCardsGame words={course.words} onScore={add} onBack={() => setSelectedGame('menu')} /> : selectedGame === 'lyrics' ? <LyricsOrderGame srt={course.srt} difficulty={lyricsDifficulty} onScore={add} onBack={() => setSelectedGame('menu')} /> : <>
+        {gameEnded ? <CompetitionEnded onRestart={restartGame} /> : selectedGame === 'menu' ? <GameSelector onSelect={game => setSelectedGame(`intro-${game}`)} /> : selectedGame === 'intro-flash' ? <GameInstructions type="flash" onBack={() => setSelectedGame('menu')} onStart={startFlashGame} /> : selectedGame === 'intro-match' ? <GameInstructions type="match" onBack={() => setSelectedGame('menu')} onStart={() => setSelectedGame('match')} /> : selectedGame === 'intro-lyrics' ? <GameInstructions type="lyrics" onBack={() => setSelectedGame('menu')} onStart={difficulty => { setLyricsDifficulty(difficulty); setSelectedGame('lyrics') }} /> : selectedGame === 'match' ? <MatchCardsGame words={courseWords} onScore={add} onBack={() => setSelectedGame('menu')} /> : selectedGame === 'lyrics' ? <LyricsOrderGame srtText={course.srtText} difficulty={lyricsDifficulty} onScore={add} onBack={() => setSelectedGame('menu')} /> : <>
           <button className="game-back-button" onClick={() => setSelectedGame('menu')}><ArrowLeft /> 選擇其他遊戲</button>
           <div className="round-label"><span>QUESTION</span><strong>{Math.min(cardIndex + 1, deck.length)} / {deck.length}</strong></div>
           <div className="question-language-badge">題目：{side === 'en' ? '英文' : '中文'}</div>
@@ -500,7 +575,7 @@ function CompetitionEnded({ onRestart }) {
   return <div className="competition-ended"><span>🏁</span><small>COMPETITION ENDED</small><h2>本場比賽已結束</h2><p>成績已完成結算。準備好後，可以重新開始一場全新的比賽。</p><button onClick={onRestart}><RotateCcw /> 開始新比賽</button></div>
 }
 
-function LyricsOrderGame({ srt, difficulty, onScore, onBack }) {
+function LyricsOrderGame({ srtText, difficulty, onScore, onBack }) {
   const [rounds, setRounds] = useState([])
   const [roundIndex, setRoundIndex] = useState(0)
   const [answeringTeam, setAnsweringTeam] = useState(null)
@@ -510,23 +585,21 @@ function LyricsOrderGame({ srt, difficulty, onScore, onBack }) {
 
   useEffect(() => {
     let active = true
-    fetch(`./${srt}`).then(response => response.text()).then(text => {
-      const usable = parseSrt(text).filter(line => {
-        const count = line.text.trim().split(/\s+/).length
-        return count >= 4 && count <= 14
-      })
-      const shuffled = shuffleWords(usable)
-      if (!active) return
-      if (difficulty === 'hard') {
-        const paired = []
-        for (let i = 0; i + 1 < shuffled.length; i += 2) paired.push({ id: `hard-${i}`, lines: [shuffled[i], shuffled[i + 1]] })
-        setRounds(paired)
-      } else {
-        setRounds(shuffled.map((line, index) => ({ id: `easy-${index}`, lines: [line] })))
-      }
+    const usable = parseSrt(srtText || '').filter(line => {
+      const count = line.text.trim().split(/\s+/).length
+      return count >= 4 && count <= 14
     })
+    const shuffled = shuffleWords(usable)
+    if (!active) return
+    if (difficulty === 'hard') {
+      const paired = []
+      for (let i = 0; i + 1 < shuffled.length; i += 2) paired.push({ id: `hard-${i}`, lines: [shuffled[i], shuffled[i + 1]] })
+      setRounds(paired)
+    } else {
+      setRounds(shuffled.map((line, index) => ({ id: `easy-${index}`, lines: [line] })))
+    }
     return () => { active = false }
-  }, [srt, difficulty])
+  }, [srtText, difficulty])
 
   const round = rounds[roundIndex]
   const words = useMemo(() => {
@@ -741,6 +814,217 @@ function TeamScore({ team, score, color, celebrating, disabled, onAdd }) {
 function Modal({ title, text, onCancel, onConfirm }) {
   useEffect(() => { const fn = e => e.key === 'Escape' && onCancel(); addEventListener('keydown', fn); return () => removeEventListener('keydown', fn) }, [onCancel])
   return <div className="modal-backdrop" onMouseDown={e => e.target === e.currentTarget && onCancel()}><div className="modal"><span className="modal-icon"><RotateCcw /></span><h2>{title}</h2><p>{text}</p><div><button onClick={onCancel}>取消</button><button className="danger" onClick={onConfirm}>確定重設</button></div></div></div>
+}
+
+function AdminDashboard() {
+  const [user, setUser] = useState(null)
+  const [authLoading, setAuthLoading] = useState(true)
+  const { courses, loading, error } = useCourses({ includeDrafts: true, enabled: !!user })
+  const [selectedId, setSelectedId] = useState(null)
+  const selectedCourse = courses.find(course => course.id === selectedId) || courses[0] || null
+
+  useEffect(() => {
+    if (!auth) { setAuthLoading(false); return }
+    return onAuthStateChanged(auth, account => { setUser(account); setAuthLoading(false) })
+  }, [])
+
+  useEffect(() => {
+    if (!selectedId && courses.length) setSelectedId(courses[0].id)
+    if (selectedId && courses.length && !courses.some(course => course.id === selectedId)) setSelectedId(courses[0]?.id || null)
+  }, [courses, selectedId])
+
+  if (!firebaseReady) return <SetupState title="尚未設定 Firebase" text="請建立 .env.local，填入 Firebase Web App 的 VITE_FIREBASE_* 設定，然後重新啟動 dev server 或重新部署。" />
+  if (authLoading) return <div className="loading"><span className="logo-mark"><Music2 /></span><p>正在確認後台登入狀態…</p></div>
+  if (!user) return <AdminLogin />
+
+  return <div className="admin-page">
+    <header className="admin-header">
+      <Brand compact />
+      <div><small>COURSE ADMIN</small><h1>課程後台</h1></div>
+      <div className="admin-header-actions"><a href="#/">返回前台</a><button onClick={() => signOut(auth)}><LogOut size={17} /> 登出</button></div>
+    </header>
+    {error && <div className="admin-error">{error}</div>}
+    <main className="admin-layout">
+      <aside className="admin-sidebar">
+        <CreateCourseForm onCreated={setSelectedId} />
+        <div className="admin-course-list">
+          <h2>所有課程</h2>
+          {loading ? <p>讀取中…</p> : courses.length ? courses.map(course => <button key={course.id} className={selectedCourse?.id === course.id ? 'active' : ''} onClick={() => setSelectedId(course.id)}>
+            <span className={`status-dot ${course.status}`} /> <div><strong>{course.title}</strong><small>{course.artist || '未填 Artist'} · {course.words.length} 字</small></div>
+          </button>) : <p>目前沒有課程。先用上方表單新增第一首歌。</p>}
+        </div>
+      </aside>
+      <section className="admin-editor-shell">
+        {selectedCourse ? <CourseEditor key={selectedCourse.id} course={selectedCourse} /> : <div className="admin-empty"><Music2 /><h2>尚未選擇課程</h2><p>新增或選擇一首歌曲後，就能編輯 YouTube、SRT 與單字。</p></div>}
+      </section>
+    </main>
+  </div>
+}
+
+function AdminLogin() {
+  const adminUsername = import.meta.env.VITE_ADMIN_USERNAME || 'admin'
+  const adminEmail = import.meta.env.VITE_ADMIN_EMAIL || ''
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const login = async e => {
+    e.preventDefault()
+    setError(''); setSubmitting(true)
+    try {
+      if (!adminEmail) throw new Error('尚未設定 VITE_ADMIN_EMAIL。')
+      if (username.trim() !== adminUsername) throw new Error('帳號或密碼錯誤。')
+      await signInWithEmailAndPassword(auth, adminEmail, password)
+    }
+    catch (err) { setError(`登入失敗：${err.message}`) }
+    finally { setSubmitting(false) }
+  }
+  return <div className="admin-login">
+    <Brand />
+    <form onSubmit={login}>
+      <small>ADMIN LOGIN</small><h1>登入課程後台</h1>
+      <label>帳號<input value={username} onChange={e => setUsername(e.target.value)} autoComplete="username" placeholder={adminUsername} required /></label>
+      <label>密碼<input type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete="current-password" required /></label>
+      {error && <p className="form-error">{error}</p>}
+      <button disabled={submitting}>{submitting ? '登入中…' : '登入'}</button>
+      <a href="#/">返回前台</a>
+    </form>
+  </div>
+}
+
+function CreateCourseForm({ onCreated }) {
+  const [title, setTitle] = useState('')
+  const [artist, setArtist] = useState('')
+  const [level, setLevel] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const create = async e => {
+    e.preventDefault()
+    if (!title.trim()) return
+    setSubmitting(true)
+    const ref = await addDoc(collection(db, 'courses'), {
+      title: title.trim(),
+      artist: artist.trim(),
+      level: level.trim(),
+      status: 'draft',
+      duration: '',
+      youtubeId: '',
+      srtText: '',
+      color: '#6d74d8',
+      words: [],
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    })
+    setTitle(''); setArtist(''); setLevel(''); setSubmitting(false); onCreated(ref.id)
+  }
+  return <form className="create-course" onSubmit={create}>
+    <h2>新增課程</h2>
+    <label>Title <b>必填</b><input value={title} onChange={e => setTitle(e.target.value)} placeholder="Twinkle Twinkle Little Star" required /></label>
+    <label>Artist <span>選填</span><input value={artist} onChange={e => setArtist(e.target.value)} placeholder="Super Simple Songs" /></label>
+    <label>Level <span>選填</span><input value={level} onChange={e => setLevel(e.target.value)} placeholder="初級" /></label>
+    <button disabled={submitting}><Plus size={17} /> {submitting ? '新增中…' : '建立草稿'}</button>
+  </form>
+}
+
+function CourseEditor({ course }) {
+  const [form, setForm] = useState(course)
+  const [saving, setSaving] = useState(false)
+  const [message, setMessage] = useState('')
+  const [confirmDelete, setConfirmDelete] = useState(false)
+
+  useEffect(() => { setForm(course); setMessage('') }, [course])
+
+  const updateField = (field, value) => setForm(current => ({ ...current, [field]: value }))
+  const updateWord = (index, field, value) => setForm(current => ({
+    ...current,
+    words: current.words.map((word, i) => i === index ? { ...word, [field]: value } : word),
+  }))
+  const updateHint = (wordIndex, hintIndex, value) => setForm(current => ({
+    ...current,
+    words: current.words.map((word, i) => i === wordIndex ? { ...word, hint: normalizeHints(word.hint).map((hint, h) => h === hintIndex ? value : hint) } : word),
+  }))
+  const addWord = () => setForm(current => ({ ...current, words: [...current.words, { id: `word-${Date.now()}`, en: '', zh: '', part: '', example: '', hint: ['', '', ''] }] }))
+  const removeWord = index => setForm(current => ({ ...current, words: current.words.filter((_, i) => i !== index) }))
+  const save = async e => {
+    e.preventDefault()
+    if (!form.title.trim()) return setMessage('Title 是必填。')
+    setSaving(true); setMessage('')
+    const words = form.words.map((word, index) => ({
+      id: slugify(word.id || word.en || `word-${index}`),
+      en: word.en.trim(),
+      zh: word.zh.trim(),
+      part: word.part.trim(),
+      example: word.example.trim(),
+      hint: normalizeHints(word.hint).map(hint => hint.trim()),
+    })).filter(word => word.en || word.zh)
+    await updateDoc(doc(db, 'courses', course.id), {
+      title: form.title.trim(),
+      artist: form.artist.trim(),
+      level: form.level.trim(),
+      duration: form.duration.trim(),
+      youtubeId: extractYoutubeId(form.youtubeId),
+      color: form.color || '#6d74d8',
+      status: form.status,
+      srtText: form.srtText,
+      words,
+      updatedAt: serverTimestamp(),
+    })
+    setSaving(false); setMessage('已儲存。')
+  }
+  const deleteCourse = async () => {
+    await deleteDoc(doc(db, 'courses', course.id))
+    setConfirmDelete(false)
+  }
+
+  return <form className="course-editor" onSubmit={save}>
+    <div className="editor-toolbar">
+      <div><small>{form.status === 'published' ? 'PUBLISHED' : 'DRAFT'}</small><h2>{form.title || '未命名課程'}</h2></div>
+      <div><button type="button" className="danger-outline" onClick={() => setConfirmDelete(true)}><Trash2 size={17} /> 刪除</button><button disabled={saving}><Save size={17} /> {saving ? '儲存中…' : '儲存課程'}</button></div>
+    </div>
+    {message && <div className="save-message">{message}</div>}
+    <div className="editor-grid">
+      <label>Title<input value={form.title} onChange={e => updateField('title', e.target.value)} required /></label>
+      <label>Artist<input value={form.artist} onChange={e => updateField('artist', e.target.value)} /></label>
+      <label>Level<input value={form.level} onChange={e => updateField('level', e.target.value)} placeholder="初級 / 中級 / 高級" /></label>
+      <label>Duration<input value={form.duration} onChange={e => updateField('duration', e.target.value)} placeholder="2:34" /></label>
+      <label>YouTube 連結或 ID<input value={form.youtubeId} onChange={e => updateField('youtubeId', e.target.value)} placeholder="https://www.youtube.com/watch?v=..." /></label>
+      <label>狀態<select value={form.status} onChange={e => updateField('status', e.target.value)}><option value="draft">草稿</option><option value="published">發布</option></select></label>
+      <label>主色<input type="color" value={form.color || '#6d74d8'} onChange={e => updateField('color', e.target.value)} /></label>
+    </div>
+    <label className="srt-editor">SRT 同步歌詞<textarea value={form.srtText} onChange={e => updateField('srtText', e.target.value)} placeholder={'1\\n00:00:19,700 --> 00:00:25,000\\nTwinkle twinkle little star'} /></label>
+    <section className="words-editor">
+      <div className="words-editor-heading"><h3>課程單字</h3><button type="button" onClick={addWord}><Plus size={17} /> 新增單字</button></div>
+      {form.words.length ? form.words.map((word, index) => <div className="word-editor" key={`${word.id}-${index}`}>
+        <div className="word-editor-title"><strong>單字 {index + 1}</strong><button type="button" onClick={() => removeWord(index)}><Trash2 size={16} /> 移除</button></div>
+        <div className="word-grid">
+          <label>英文<input value={word.en} onChange={e => updateWord(index, 'en', e.target.value)} /></label>
+          <label>中文<input value={word.zh} onChange={e => updateWord(index, 'zh', e.target.value)} /></label>
+          <label>詞性<input value={word.part} onChange={e => updateWord(index, 'part', e.target.value)} placeholder="noun / verb" /></label>
+          <label>例句<input value={word.example} onChange={e => updateWord(index, 'example', e.target.value)} /></label>
+        </div>
+        <div className="hint-grid">{normalizeHints(word.hint).map((hint, hintIndex) => <label key={hintIndex}>提示 {hintIndex + 1}<input value={hint} onChange={e => updateHint(index, hintIndex, e.target.value)} placeholder={hintIndex === 0 ? '✨' : '中文提示'} /></label>)}</div>
+      </div>) : <div className="admin-empty small"><BookOpen /><h2>還沒有單字</h2><p>按「新增單字」開始建立字卡。</p></div>}
+    </section>
+    {confirmDelete && <Modal title="確定刪除這首課程？" text="這會刪除 Firestore 中的課程資料、SRT 與所有單字。此動作無法復原。" onCancel={() => setConfirmDelete(false)} onConfirm={deleteCourse} />}
+  </form>
+}
+
+function normalizeHints(hints) {
+  const list = Array.isArray(hints) ? hints : []
+  return [list[0] || '', list[1] || '', list[2] || '']
+}
+
+function slugify(value) {
+  const text = String(value || '').toLowerCase().trim()
+    .replace(/[^a-z0-9\u4e00-\u9fa5]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+  return text || `item-${Date.now()}`
+}
+
+function extractYoutubeId(value) {
+  const input = String(value || '').trim()
+  if (!input) return ''
+  const match = input.match(/(?:v=|youtu\.be\/|embed\/|shorts\/)([A-Za-z0-9_-]{11})/) || input.match(/^[A-Za-z0-9_-]{11}$/)
+  return match ? (match[1] || match[0]) : input
 }
 
 export default App
